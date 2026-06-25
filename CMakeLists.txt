@@ -9,4 +9,11 @@ endif ()
 
 project(VulkanSandbox)
 
+find_package(Vulkan REQUIRED)
+
+add_subdirectory(extern/glm)
+add_subdirectory(extern/sdl3)
+add_subdirectory(extern/vma)
+add_subdirectory(extern/volk)
+
 add_subdirectory(src/model_viewer)

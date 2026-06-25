@@ -12,6 +12,7 @@ target_link_libraries(ModelViewer
         PRIVATE SDL3::SDL3
         PRIVATE volk
         PRIVATE GPUOpen::VulkanMemoryAllocator
-        PRIVATE glm::glm)
+        PRIVATE glm::glm
+        PRIVATE TinyGLTF)
 
 target_compile_definitions(ModelViewer PRIVATE VK_NO_PROTOTYPES)

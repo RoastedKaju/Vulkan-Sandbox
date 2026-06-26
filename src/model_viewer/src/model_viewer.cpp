@@ -41,6 +41,8 @@ constexpr uint32_t kMaxFramesInFlight = 2;
 uint32_t image_index{0};
 uint32_t frame_index{0};
 
+constexpr uint32_t kMaxTextures = 64;
+
 glm::ivec2 window_size{};
 
 VkInstance instance{VK_NULL_HANDLE};
@@ -77,6 +79,23 @@ struct MeshData {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
 };
+
+struct ShaderData {
+    glm::mat4 projection;
+    glm::mat4 view;
+    glm::mat4 model;
+};
+
+ShaderData shader_data{};
+
+struct ShaderDataBuffer {
+    VmaAllocation allocation{VK_NULL_HANDLE};
+    VmaAllocationInfo allocation_info{};
+    VkBuffer buffer{VK_NULL_HANDLE};
+    VkDeviceAddress device_address{};
+};
+
+std::array<ShaderDataBuffer, kMaxFramesInFlight> shader_data_buffers{};
 
 static const uint8_t *get_accessor_data(const tinygltf::Model &model, const tinygltf::Accessor &accessor) {
     const auto &view = model.bufferViews[accessor.bufferView];
@@ -295,6 +314,7 @@ int main(int argc, char *argv[]) {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
         .descriptorIndexing = true,
         .shaderSampledImageArrayNonUniformIndexing = true,
+        .descriptorBindingPartiallyBound = true,
         .descriptorBindingVariableDescriptorCount = true,
         .runtimeDescriptorArray = true,
         .bufferDeviceAddress = true
@@ -503,6 +523,143 @@ int main(int argc, char *argv[]) {
            indices.data(),
            index_buf_size);
     std::printf("Mesh data loaded.\n");
+
+    // shader data buffer
+    for (auto i = 0; i < kMaxFramesInFlight; ++i) {
+        VkBufferCreateInfo uniform_buffer_create_info{
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size = sizeof(ShaderData),
+            .usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        };
+        VmaAllocationCreateInfo uniform_buffer_alloc_create_info{
+            .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                     VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT |
+                     VMA_ALLOCATION_CREATE_MAPPED_BIT,
+            .usage = VMA_MEMORY_USAGE_AUTO,
+        };
+        check(vmaCreateBuffer(
+            allocator,
+            &uniform_buffer_create_info, &uniform_buffer_alloc_create_info,
+            &shader_data_buffers[i].buffer, &shader_data_buffers[i].allocation,
+            &shader_data_buffers[i].allocation_info));
+        VkBufferDeviceAddressInfo uniform_buffer_device_address_info{
+            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            .buffer = shader_data_buffers[i].buffer,
+        };
+        shader_data_buffers[i].device_address = vkGetBufferDeviceAddress(device, &uniform_buffer_device_address_info);
+    }
+    std::printf("Shader data buffers created.\n");
+
+    // sync-objects
+    VkSemaphoreCreateInfo semaphore_create_info{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    VkFenceCreateInfo fence_create_info{
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        .flags = VK_FENCE_CREATE_SIGNALED_BIT
+    };
+    for (auto i = 0; i < kMaxFramesInFlight; ++i) {
+        check(vkCreateFence(device, &fence_create_info, nullptr, &fences[i]));
+        check(vkCreateSemaphore(device, &semaphore_create_info, nullptr, &image_acquired_semaphores[i]));
+    }
+    render_complete_semaphores.resize(swap_chain_images.size());
+    for (auto &semaphore: render_complete_semaphores) {
+        check(vkCreateSemaphore(device, &semaphore_create_info, nullptr, &semaphore));
+    }
+    std::printf("Sync objects created.\n");
+
+    // command pool
+    VkCommandPoolCreateInfo command_pool_create_info{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+        .queueFamilyIndex = queue_family_index
+    };
+    check(vkCreateCommandPool(device, &command_pool_create_info, nullptr, &command_pool));
+    VkCommandBufferAllocateInfo command_buffer_allocate_info{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = command_pool,
+        .commandBufferCount = kMaxFramesInFlight
+    };
+    check(vkAllocateCommandBuffers(device, &command_buffer_allocate_info, command_buffers.data()));
+    std::printf("Command pool and buffers created.\n");
+
+    // descriptors
+    std::vector<VkDescriptorImageInfo> texture_descriptors{};
+    VkDescriptorPool descriptor_pool{VK_NULL_HANDLE};
+    VkDescriptorSetLayout descriptor_set_layout{VK_NULL_HANDLE};
+    VkDescriptorSet descriptor_set{VK_NULL_HANDLE};
+
+    VkDescriptorBindingFlags desc_binding_flags{
+        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
+    };
+
+    VkDescriptorSetLayoutBindingFlagsCreateInfo binding_flags_create_info{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindingFlags = &desc_binding_flags
+    };
+
+    VkDescriptorSetLayoutBinding texture_binding{
+        .binding = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = kMaxTextures,
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+    };
+
+    VkDescriptorSetLayoutCreateInfo layout_info{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .pNext = &binding_flags_create_info,
+        .bindingCount = 1,
+        .pBindings = &texture_binding
+    };
+
+    check(vkCreateDescriptorSetLayout(device, &layout_info, nullptr, &descriptor_set_layout));
+
+    VkDescriptorPoolSize pool_size{
+        .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = kMaxTextures
+    };
+
+    VkDescriptorPoolCreateInfo pool_info{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .maxSets = 1,
+        .poolSizeCount = 1,
+        .pPoolSizes = &pool_size
+    };
+
+    check(vkCreateDescriptorPool(device, &pool_info, nullptr, &descriptor_pool));
+
+    uint32_t variable_descriptor_count = kMaxTextures;
+
+    VkDescriptorSetVariableDescriptorCountAllocateInfo variable_count_info{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO,
+        .descriptorSetCount = 1,
+        .pDescriptorCounts = &variable_descriptor_count
+    };
+
+    VkDescriptorSetAllocateInfo desc_set_allocate_info{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .pNext = &variable_count_info,
+        .descriptorPool = descriptor_pool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &descriptor_set_layout
+    };
+
+    check(vkAllocateDescriptorSets(device, &desc_set_allocate_info, &descriptor_set));
+
+    // update descriptors only if textures exist
+    if (!texture_descriptors.empty()) {
+        VkWriteDescriptorSet write_desc_set{
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = descriptor_set,
+            .dstBinding = 0,
+            .descriptorCount = static_cast<uint32_t>(texture_descriptors.size()),
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = texture_descriptors.data()
+        };
+
+        vkUpdateDescriptorSets(device, 1, &write_desc_set, 0, nullptr);
+    }
+    std::printf("Descriptor sets created.\n");
+
 
     return EXIT_SUCCESS;
 }

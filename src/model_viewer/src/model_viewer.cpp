@@ -2,7 +2,6 @@
 #include <vector>
 #include <array>
 #include <cassert>
-#include <unordered_map>
 #include <filesystem>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -20,6 +19,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <tiny_gltf.h>
+#include <shaderc/shaderc.hpp>
 
 constexpr bool kHasValidationLayer = true;
 const std::vector<const char *> validation_layers = {"VK_LAYER_KHRONOS_validation"};
@@ -660,6 +660,7 @@ int main(int argc, char *argv[]) {
     }
     std::printf("Descriptor sets created.\n");
 
+    // load shaders
 
     return EXIT_SUCCESS;
 }

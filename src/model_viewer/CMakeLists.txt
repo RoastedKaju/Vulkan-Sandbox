@@ -16,3 +16,7 @@ target_link_libraries(ModelViewer
         PRIVATE TinyGLTF)
 
 target_compile_definitions(ModelViewer PRIVATE VK_NO_PROTOTYPES)
+
+target_include_directories(ModelViewer SYSTEM PRIVATE "${CMAKE_SOURCE_DIR}/extern/shaderc")
+target_link_directories(ModelViewer PRIVATE "${CMAKE_SOURCE_DIR}/extern/shaderc/bin")
+target_link_libraries(ModelViewer PRIVATE shaderc_shared)

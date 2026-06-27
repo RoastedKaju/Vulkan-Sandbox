@@ -7,6 +7,10 @@ else ()
     message(STATUS "Vulkan SDK found: $ENV{VULKAN_SDK}")
 endif ()
 
+# set global CXX standard
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 project(VulkanSandbox)
 
 find_package(Vulkan REQUIRED)
@@ -17,6 +21,9 @@ add_subdirectory(extern/sdl3)
 add_subdirectory(extern/vma)
 add_subdirectory(extern/volk)
 add_subdirectory(extern/tinygltf)
+
+# Common library
+add_subdirectory(src/common)
 
 # Examples
 add_subdirectory(src/model_viewer)

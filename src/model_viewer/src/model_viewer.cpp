@@ -518,7 +518,7 @@ int main(int argc, char *argv[]) {
     std::string warnings{};
     std::string errors{};
 
-    const std::filesystem::path model_path{"cube.glb"};
+    const std::filesystem::path model_path{"tank.glb"};
 
     if (!std::filesystem::exists(model_path)) {
         std::printf("Model path is invalid.\n");
@@ -799,6 +799,8 @@ int main(int argc, char *argv[]) {
     };
     VkPipelineRasterizationStateCreateInfo rasterization_state{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .cullMode = VK_CULL_MODE_BACK_BIT,
+        .frontFace = VK_FRONT_FACE_CLOCKWISE,
         .lineWidth = 1.0f
     };
     VkPipelineMultisampleStateCreateInfo multisample_state{
@@ -874,9 +876,16 @@ int main(int argc, char *argv[]) {
         // update shader data
         shader_data.projection = glm::perspective(glm::radians(45.0f),
                                                   static_cast<float>(window_size.x) / static_cast<float>(window_size.y),
-                                                  0.1f, 100.0f);
-        shader_data.view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -5.0f));
-        shader_data.model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
+                                                  0.1f, 1000.0f);
+        shader_data.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 3.0f),
+                                       glm::vec3(0.0f, 0.0f, 0.0f),
+                                       glm::vec3(0.0f, 1.0f, 0.0f));
+        auto time = SDL_GetTicks() / 1000.0f;
+        auto m = glm::mat4(1.0f);
+        m = glm::translate(m, glm::vec3(0.0f, 0.0f, 0.0f));
+        m = glm::rotate(m, glm::radians(45.0f * time), glm::vec3(0.0f, 1.0f, 0.0f));
+        m = glm::scale(m, glm::vec3(0.3f, 0.3f, 0.3f));
+        shader_data.model = m;
         memcpy(shader_data_buffers[frame_index].allocation_info.pMappedData, &shader_data, sizeof(shader_data));
 
         // record commands

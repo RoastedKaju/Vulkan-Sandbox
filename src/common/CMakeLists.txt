@@ -1,17 +1,27 @@
-add_library(Common INTERFACE)
+add_library(Common SHARED)
 
-target_link_libraries(Common
-        INTERFACE Vulkan::Vulkan
-        INTERFACE SDL3::SDL3
-        INTERFACE volk
-        INTERFACE GPUOpen::VulkanMemoryAllocator
-        INTERFACE glm::glm
-        INTERFACE TinyGLTF
+target_sources(Common PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/context.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/context.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/swap_chain.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/swap_chain.h"
 )
 
-# Volk define requirement
-target_compile_definitions(Common INTERFACE VK_NO_PROTOTYPES)
+target_include_directories(Common PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+
+target_link_libraries(Common
+        PUBLIC Vulkan::Vulkan
+        PUBLIC SDL3::SDL3
+        PUBLIC volk
+        PUBLIC GPUOpen::VulkanMemoryAllocator
+        PUBLIC glm::glm
+        PUBLIC TinyGLTF
+)
+
+target_compile_definitions(Common PUBLIC VK_NO_PROTOTYPES)
+target_compile_definitions(Common PRIVATE GLM_FORCE_RADIANS GLM_FORCE_DEPTH_ZERO_TO_ONE)
+
 # Shader-C linking
-target_include_directories(Common INTERFACE "${CMAKE_SOURCE_DIR}/extern/shaderc")
-target_link_directories(Common INTERFACE "${CMAKE_SOURCE_DIR}/extern/shaderc/bin")
-target_link_libraries(Common INTERFACE shaderc_shared)
+target_include_directories(Common PUBLIC "${CMAKE_SOURCE_DIR}/extern/shaderc")
+target_link_directories(Common PUBLIC "${CMAKE_SOURCE_DIR}/extern/shaderc/bin")
+target_link_libraries(Common PUBLIC shaderc_shared)

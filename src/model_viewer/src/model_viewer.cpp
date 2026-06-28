@@ -26,6 +26,7 @@
 #include "context.h"
 #include "mesh.h"
 #include "buffer.h"
+#include "shader.h"
 
 struct ShaderData {
     glm::mat4 projection;
@@ -42,7 +43,7 @@ int main(int argc, char *argv[]) {
 
     const auto ctx = std::make_unique<Context>(config);
     ctx->initialize();
-    SDL_Window *window = ctx->create_window("Model Viewer", 1280u, 720u);
+    [[maybe_unused]] SDL_Window *window = ctx->create_window("Model Viewer", 1280u, 720u);
 
     // load model
     Mesh tank_mesh{};
@@ -63,12 +64,21 @@ int main(int argc, char *argv[]) {
     index_buffer.copy_data(tank_mesh.data().indices.data());
 
     // shader data and its buffers
+    // TODO: probably should move this to context class and only expose shader data size
     [[maybe_unused]] ShaderData shader_data{};
     std::vector<Buffer> shader_data_buffers(ctx->get_max_frame_count());
     // create buffers per frame in flight
     for (auto i = 0; i < ctx->get_max_frame_count(); i++) {
         shader_data_buffers[i].create_buffer(ctx.get(), sizeof(ShaderData), VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
     }
+
+    // load shaders
+    VkShaderModule vert_shader = Shader::create_shader_module(ctx.get(),
+                                                              "assets/shaders/vert.glsl",
+                                                              shaderc_vertex_shader);
+    VkShaderModule frag_shader = Shader::create_shader_module(ctx.get(),
+                                                              "assets/shaders/frag.glsl",
+                                                              shaderc_fragment_shader);
 
     return EXIT_SUCCESS;
 }

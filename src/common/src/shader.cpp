@@ -1,8 +1,9 @@
 #include "shader.h"
-#include "utils.h"
-#include "context.h"
 
 #include <volk.h>
+
+#include "utils.h"
+#include "context.h"
 
 VkShaderModule Shader::create_shader_module(const Context *context,
                                             const std::filesystem::path &path,

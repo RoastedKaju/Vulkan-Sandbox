@@ -1,27 +1,5 @@
 #include <iostream>
 #include <memory>
-#include <stdexcept>
-// #include <vector>
-// #include <array>
-// #include <cassert>
-// #include <filesystem>
-// #include <SDL3/SDL.h>
-// #include <SDL3/SDL_vulkan.h>
-// #include <vulkan/vulkan.h>
-// #define VOLK_IMPLEMENTATION
-// #include <volk.h>
-// #define VMA_IMPLEMENTATION
-// #include <vma/vk_mem_alloc.h>
-// #define GLM_FORCE_RADIANS
-// #define GLM_FORCE_DEPTH_ZERO_TO_ONE
-// #include <glm/glm.hpp>
-// #include <glm/gtc/matrix_transform.hpp>
-// #include <glm/gtc/quaternion.hpp>
-// #define TINYGLTF_IMPLEMENTATION
-// #define STB_IMAGE_IMPLEMENTATION
-// #define STB_IMAGE_WRITE_IMPLEMENTATION
-// #include <tiny_gltf.h>
-// #include <shaderc/shaderc.hpp>
 
 #include "context.h"
 #include "mesh.h"
@@ -73,12 +51,12 @@ int main(int argc, char *argv[]) {
     }
 
     // load shaders
-    VkShaderModule vert_shader = Shader::create_shader_module(ctx.get(),
-                                                              "assets/shaders/vert.glsl",
-                                                              shaderc_vertex_shader);
-    VkShaderModule frag_shader = Shader::create_shader_module(ctx.get(),
-                                                              "assets/shaders/frag.glsl",
-                                                              shaderc_fragment_shader);
+    [[maybe_unused]] VkShaderModule vert_shader = Shader::create_shader_module(ctx.get(),
+                                                                               "assets/shaders/vert.glsl",
+                                                                               shaderc_vertex_shader);
+    [[maybe_unused]] VkShaderModule frag_shader = Shader::create_shader_module(ctx.get(),
+                                                                               "assets/shaders/frag.glsl",
+                                                                               shaderc_fragment_shader);
 
     return EXIT_SUCCESS;
 }

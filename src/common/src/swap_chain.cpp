@@ -1,8 +1,9 @@
 #include "swap_chain.h"
-#include "context.h"
-#include "utils.h"
 
 #include <volk.h>
+
+#include "context.h"
+#include "utils.h"
 
 void SwapChain::init_swap_chain(const Context *context, const VkFormat image_format) {
     VkSurfaceCapabilitiesKHR surface_capabilities{};

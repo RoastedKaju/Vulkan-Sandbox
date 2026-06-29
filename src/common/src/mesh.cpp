@@ -1,10 +1,7 @@
 #include "mesh.h"
-#include "utils.h"
 
-#define TINYGLTF_IMPLEMENTATION
-#define STB_IMAGE_IMPLEMENTATION
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include <tiny_gltf.h>
+#include "utils.h"
+#include "model_importer.h"
 
 void Mesh::load_mesh(const std::filesystem::path &path) {
     if (!std::filesystem::exists(path)) {

@@ -1,11 +1,13 @@
 #include "context.h"
-#include "utils.h"
+
+#include <cassert>
 
 #define VOLK_IMPLEMENTATION
 #include <volk.h>
 #define VMA_IMPLEMENTATION
 #include <vma/vk_mem_alloc.h>
-#include <cassert>
+
+#include "utils.h"
 
 // debug callback
 // ReSharper disable once CppParameterMayBeConst

@@ -1,8 +1,9 @@
 #include "buffer.h"
-#include "context.h"
-#include "utils.h"
 
 #include <volk.h>
+
+#include "context.h"
+#include "utils.h"
 
 void Buffer::create_buffer(const Context *context, const VkDeviceSize size, const VkBufferUsageFlags usage) {
     size_ = size;

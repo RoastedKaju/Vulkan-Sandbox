@@ -1,7 +1,8 @@
 #include "texture_descriptor_set.h"
-#include "utils.h"
 
 #include <volk.h>
+
+#include "utils.h"
 
 void TextureDescriptorSet::create(const VkDevice device, const uint32_t texture_count) {
     max_texture_count_ = texture_count;

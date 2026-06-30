@@ -39,6 +39,7 @@ void SwapChain::init_swap_chain(const Context *context, const VkFormat image_for
     uint32_t image_count{0};
     check(vkGetSwapchainImagesKHR(device, swap_chain_, &image_count, nullptr));
     swap_chain_images_.resize(image_count);
+    swap_chain_image_states_.resize(image_count);
     check(vkGetSwapchainImagesKHR(device, swap_chain_, &image_count, swap_chain_images_.data()));
     swap_chain_image_views_.resize(image_count);
     for (auto i = 0; i < image_count; ++i) {
@@ -60,6 +61,7 @@ void SwapChain::setup_depth_attachment(const Context *context) {
     const auto device = context->device_;
     const auto window_size = context->window_size_;
 
+    // ReSharper disable once CppTooWideScopeInitStatement
     std::vector<VkFormat> depth_format_list{VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT};
     // ReSharper disable once CppLocalVariableMayBeConst
     for (VkFormat &format: depth_format_list) {

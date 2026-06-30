@@ -17,9 +17,11 @@ public:
 
     void update(const void *src) const;
 
+    VkBuffer get() const { return buffer_; }
+
     VkDeviceAddress device_address(const Context *context) const;
 
-public:
+private:
     VkBuffer buffer_{VK_NULL_HANDLE};
     VmaAllocation allocation_{VK_NULL_HANDLE};
     VmaAllocationInfo allocation_info_{};
@@ -30,7 +32,7 @@ template<typename T>
 class PerFrameBuffer {
 public:
     explicit PerFrameBuffer(const Context *context) : ctx_(context),
-                                                     buffers_(context->get_max_frame_count()) {
+                                                      buffers_(context->get_max_frame_count()) {
         for (auto &buffer: buffers_) {
             buffer.create_buffer(context, sizeof(T), VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
         }

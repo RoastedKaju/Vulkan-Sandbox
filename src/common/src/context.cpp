@@ -189,92 +189,85 @@ SDL_Window *Context::create_window(const char *title, const uint32_t width, cons
     return window;
 }
 
-void Context::sync() {
+void Context::acquire_command_buffer() {
+    const VkSwapchainKHR swap_chain = swap_chain_.get();
+    const uint32_t frame_index = frame_data_.frame_index_;
+    const auto &fences = frame_data_.fences_;
+    const auto &image_acquire_semaphores = frame_data_.image_acquired_semaphores_;
+
     // sync
-    check(vkWaitForFences(device_, 1, &frame_data_.fences_[frame_data_.frame_index_], true, UINT64_MAX));
-    check(vkResetFences(device_, 1, &frame_data_.fences_[frame_data_.frame_index_]));
-    const VkResult result = vkAcquireNextImageKHR(device_,
-                                                  swap_chain_.swap_chain_,
-                                                  UINT64_MAX,
-                                                  frame_data_.image_acquired_semaphores_[frame_data_.frame_index_],
-                                                  VK_NULL_HANDLE, &frame_data_.image_index_);
-    check_swap_chain(result, swap_chain_.is_swap_chain_dirty_);
+    check(vkWaitForFences(device_, 1, &fences[frame_index], true, UINT64_MAX));
+    check(vkResetFences(device_, 1, &fences[frame_index]));
+    const VkResult acquire_next_image_result = vkAcquireNextImageKHR(device_,
+                                                                     swap_chain,
+                                                                     UINT64_MAX,
+                                                                     image_acquire_semaphores[frame_index],
+                                                                     VK_NULL_HANDLE, &frame_data_.image_index_);
+    if (acquire_next_image_result < VK_SUCCESS) {
+        if (acquire_next_image_result == VK_ERROR_OUT_OF_DATE_KHR) {
+            swap_chain_.mark_swap_chain_dirty();
+        } else {
+            printf("Swap-chain check failed %d\b", acquire_next_image_result);
+            exit(EXIT_FAILURE);
+        }
+    }
 }
 
-void Context::draw(VkPipelineLayout pipeline_layout,
-                   VkPipeline pipeline,
-                   VkDescriptorSet descriptor_set,
-                   VkBuffer &vert_buffer,
-                   VkBuffer &index_buffer,
-                   VkDeviceAddress push_const_buf_ad,
-                   uint32_t index_count) {
-    // record commands
+void Context::begin_rendering() {
     const uint32_t frame_index = frame_data_.frame_index_;
     const uint32_t image_index = frame_data_.image_index_;
+    const auto current_swap_chain_image = swap_chain_.get_images()[image_index];
+    auto &current_swap_chain_image_state = swap_chain_.get_states()[image_index];
+    auto &current_depth_image_state = swap_chain_.get_depth_state();
 
-    auto cmd = frame_data_.command_buffers_[frame_index];
+    const auto cmd = frame_data_.command_buffers_[frame_index];
+
     check(vkResetCommandBuffer(cmd, 0));
-    VkCommandBufferBeginInfo cmd_begin_info{
+
+    constexpr VkCommandBufferBeginInfo cmd_begin_info{
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
     };
     check(vkBeginCommandBuffer(cmd, &cmd_begin_info));
-    // barriers
-    std::array<VkImageMemoryBarrier2, 2> output_barriers{
-        VkImageMemoryBarrier2{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .srcAccessMask = 0,
-            .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-            .image = swap_chain_.swap_chain_images_[image_index],
-            .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1}
-        },
-        VkImageMemoryBarrier2{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-            .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-            .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-            .image = swap_chain_.depth_image_,
-            .subresourceRange{
-                .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
-                .levelCount = 1,
-                .layerCount = 1
-            }
-        }
-    };
-    VkDependencyInfo barrier_dep_info{
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 2,
-        .pImageMemoryBarriers = output_barriers.data()
-    };
-    vkCmdPipelineBarrier2(cmd, &barrier_dep_info);
+
+    // for swap chain image
+    transition_image(cmd, current_swap_chain_image, current_swap_chain_image_state,
+                     VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
+                     VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+
+    // for depth image
+    transition_image(cmd, swap_chain_.get_depth_image(),
+                     current_depth_image_state,
+                     VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                     VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                     VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                     VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
+
     // rendering attachments
-    VkRenderingAttachmentInfo color_attachment_info{
+    const VkRenderingAttachmentInfo color_attachment_info{
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView = swap_chain_.swap_chain_image_views_[image_index],
+        .imageView = swap_chain_.get_views()[image_index],
         .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
         .clearValue = {.color = {0.0f, 0.0f, 0.0f, 1.0f}}
     };
-    VkRenderingAttachmentInfo depth_attachment_info{
+    const VkRenderingAttachmentInfo depth_attachment_info{
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView = swap_chain_.depth_image_view_,
+        .imageView = swap_chain_.get_depth_image_view(),
         .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
         .clearValue = {.depthStencil = {1.0f, 0}}
     };
-    VkRenderingInfo rendering_info{
+    const VkRenderingInfo rendering_info{
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .renderArea{
-            .extent{.width = static_cast<uint32_t>(window_size_.x), .height = static_cast<uint32_t>(window_size_.y)}
+            .extent{
+                .width = static_cast<uint32_t>(window_size_.x),
+                .height = static_cast<uint32_t>(window_size_.y)
+            }
         },
         .layerCount = 1,
         .colorAttachmentCount = 1,
@@ -282,60 +275,91 @@ void Context::draw(VkPipelineLayout pipeline_layout,
         .pDepthAttachment = &depth_attachment_info,
     };
 
-
-    // dynamic rendering
     vkCmdBeginRendering(cmd, &rendering_info);
-    VkViewport viewport{
+
+    // default viewport/scissor — set every time we begin rendering so callers
+    // don't have to think about it unless they want to override
+    const VkViewport viewport{
         .width = static_cast<float>(window_size_.x),
         .height = static_cast<float>(window_size_.y),
         .minDepth = 0.0f,
         .maxDepth = 1.0f
     };
     vkCmdSetViewport(cmd, 0, 1, &viewport);
-    VkRect2D scissor{
-        .extent{.width = static_cast<uint32_t>(window_size_.x), .height = static_cast<uint32_t>(window_size_.y)}
+
+    const VkRect2D scissor{
+        .extent{
+            .width = static_cast<uint32_t>(window_size_.x),
+            .height = static_cast<uint32_t>(window_size_.y)
+        }
     };
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0, 1, &descriptor_set, 0,
-                            nullptr);
-    VkDeviceSize vertex_offset{0};
-    vkCmdBindVertexBuffers(cmd, 0, 1, &vert_buffer, &vertex_offset);
-    vkCmdBindIndexBuffer(cmd, index_buffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdPushConstants(cmd,
-                       pipeline_layout,
-                       VK_SHADER_STAGE_VERTEX_BIT,
-                       0,
-                       sizeof(VkDeviceAddress),
-                       &push_const_buf_ad);
+}
 
-    // draw
+void Context::bind_pipeline(const VkPipeline pipeline) const {
+    const uint32_t frame_index = frame_data_.frame_index_;
+    const auto cmd = frame_data_.command_buffers_[frame_index];
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+}
+
+void Context::bind_descriptor_set(const VkPipelineLayout pipeline_layout, const VkDescriptorSet descriptor_set) const {
+    const uint32_t frame_index = frame_data_.frame_index_;
+    const auto cmd = frame_data_.command_buffers_[frame_index];
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0, 1, &descriptor_set, 0, nullptr);
+}
+
+void Context::bind_vertex_buffer(const VkBuffer buffer) const {
+    const uint32_t frame_index = frame_data_.frame_index_;
+    const auto cmd = frame_data_.command_buffers_[frame_index];
+    constexpr VkDeviceSize vertex_offset{0};
+    vkCmdBindVertexBuffers(cmd, 0, 1, &buffer, &vertex_offset);
+}
+
+void Context::bind_index_buffer(const VkBuffer buffer) const {
+    const uint32_t frame_index = frame_data_.frame_index_;
+    const auto cmd = frame_data_.command_buffers_[frame_index];
+    vkCmdBindIndexBuffer(cmd, buffer, 0, VK_INDEX_TYPE_UINT32);
+}
+
+void Context::cmd_push_constants(const VkPipelineLayout pipeline_layout, const VkDeviceAddress address) const {
+    const uint32_t frame_index = frame_data_.frame_index_;
+    const auto cmd = frame_data_.command_buffers_[frame_index];
+    vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VkDeviceAddress), &address);
+}
+
+void Context::draw_indexed(const uint32_t index_count) const {
+    const uint32_t frame_index = frame_data_.frame_index_;
+    const auto cmd = frame_data_.command_buffers_[frame_index];
     vkCmdDrawIndexed(cmd, index_count, 1, 0, 0, 0);
-    vkCmdEndRendering(cmd);
+}
 
-    // present
-    VkImageMemoryBarrier2 barrier_present{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .dstAccessMask = 0,
-        .oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .image = swap_chain_.swap_chain_images_[image_index],
-        .subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .levelCount = 1, .layerCount = 1}
-    };
-    VkDependencyInfo barrier_present_dependency_info{
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &barrier_present
-    };
-    vkCmdPipelineBarrier2(cmd, &barrier_present_dependency_info);
+void Context::end_rendering() const {
+    const uint32_t frame_index = frame_data_.frame_index_;
+    const auto cmd = frame_data_.command_buffers_[frame_index];
+    vkCmdEndRendering(cmd);
+}
+
+void Context::submit() {
+    const uint32_t frame_index = frame_data_.frame_index_;
+    const uint32_t image_index = frame_data_.image_index_;
+    const auto current_swap_chain_image = swap_chain_.get_images()[image_index];
+    auto &current_swap_chain_image_state = swap_chain_.get_states()[image_index];
+
+    const auto cmd = frame_data_.command_buffers_[frame_index];
+
+    auto swap_chain = swap_chain_.get();
+
+    // transition to present
+    transition_image(cmd, current_swap_chain_image, current_swap_chain_image_state,
+                     VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                     0,
+                     VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+
     check(vkEndCommandBuffer(cmd));
 
     // submit
-    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-    VkSubmitInfo submit_info{
+    constexpr VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    const VkSubmitInfo submit_info{
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .waitSemaphoreCount = 1,
         .pWaitSemaphores = &frame_data_.image_acquired_semaphores_[frame_index],
@@ -346,13 +370,15 @@ void Context::draw(VkPipelineLayout pipeline_layout,
         .pSignalSemaphores = &frame_data_.render_complete_semaphores_[image_index]
     };
     check(vkQueueSubmit(queue_, 1, &submit_info, frame_data_.fences_[frame_index]));
+
     frame_data_.frame_index_ = (frame_index + 1) % frame_data_.max_frames_in_flight_;
-    VkPresentInfoKHR present_info{
+
+    const VkPresentInfoKHR present_info{
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = 1,
         .pWaitSemaphores = &frame_data_.render_complete_semaphores_[image_index],
         .swapchainCount = 1,
-        .pSwapchains = &swap_chain_.swap_chain_,
+        .pSwapchains = &swap_chain,
         .pImageIndices = &image_index
     };
     vkQueuePresentKHR(queue_, &present_info);
@@ -393,4 +419,36 @@ void Context::create_frame_resources() {
     };
     check(vkAllocateCommandBuffers(device_, &command_buffer_allocate_info, frame_data_.command_buffers_.data()));
     std::printf("Command pool and buffers created.\n");
+}
+
+void Context::transition_image(const VkCommandBuffer cmd,
+                               const VkImage image,
+                               ImageState &state,
+                               const VkImageLayout new_layout,
+                               const VkAccessFlags2 new_access,
+                               const VkPipelineStageFlags2 new_stage,
+                               const VkImageAspectFlags aspect) {
+    if (state.layout == new_layout && state.access == new_access) {
+        return;
+    }
+
+    VkImageMemoryBarrier2 barrier{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = state.stage,
+        .srcAccessMask = state.access,
+        .dstStageMask = new_stage,
+        .dstAccessMask = new_access,
+        .oldLayout = state.layout,
+        .newLayout = new_layout,
+        .image = image,
+        .subresourceRange{.aspectMask = aspect, .levelCount = 1, .layerCount = 1}
+    };
+    const VkDependencyInfo dep_info{
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &barrier
+    };
+    vkCmdPipelineBarrier2(cmd, &dep_info);
+
+    state = {new_layout, new_access, new_stage};
 }

@@ -18,7 +18,6 @@ struct Config {
     std::string app_name_ = "default";
     VkPresentModeKHR present_mode_ = VK_PRESENT_MODE_FIFO_KHR;
     bool enable_validation_ = true;
-    uint32_t max_texture_count_ = 128;
 };
 
 class Context {
@@ -39,15 +38,25 @@ public:
 
     SDL_Window *create_window(const char *title, uint32_t width, uint32_t height);
 
-    void sync();
+    void acquire_command_buffer();
 
-    void draw(VkPipelineLayout pipeline_layout,
-              VkPipeline pipeline,
-              VkDescriptorSet descriptor_set,
-              VkBuffer &vert_buffer,
-              VkBuffer &index_buffer,
-              VkDeviceAddress push_const_buf_ad,
-              uint32_t index_count);
+    void begin_rendering();
+
+    void bind_pipeline(VkPipeline pipeline) const;
+
+    void bind_descriptor_set(VkPipelineLayout pipeline_layout, VkDescriptorSet descriptor_set) const;
+
+    void bind_vertex_buffer(VkBuffer buffer) const;
+
+    void bind_index_buffer(VkBuffer buffer) const;
+
+    void cmd_push_constants(VkPipelineLayout pipeline_layout, VkDeviceAddress address) const;
+
+    void draw_indexed(uint32_t index_count) const;
+
+    void end_rendering() const;
+
+    void submit();
 
     /**
      *
@@ -68,6 +77,14 @@ private:
     void create_swap_chain();
 
     void create_frame_resources();
+
+    static void transition_image(VkCommandBuffer cmd,
+                                 VkImage image,
+                                 ImageState &state,
+                                 VkImageLayout new_layout,
+                                 VkAccessFlags2 new_access,
+                                 VkPipelineStageFlags2 new_stage,
+                                 VkImageAspectFlags aspect);
 
     Config config_;
 

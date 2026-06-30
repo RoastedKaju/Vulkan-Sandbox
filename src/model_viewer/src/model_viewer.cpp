@@ -111,10 +111,6 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        uint32_t frame_index = ctx->get_frame_index();
-
-        ctx->sync();
-
         // update shader data
         shader_data.projection = glm::perspective(glm::radians(45.0f),
                                                   1280.0f / 720.0f,
@@ -126,19 +122,31 @@ int main(int argc, char *argv[]) {
 
         auto time = SDL_GetTicks() / 1000.0f;
 
-        auto transform = glm::mat4(1.0f);
-        transform = glm::translate(transform, glm::vec3(0.0f, 0.0f, 0.0f));
-        transform = glm::rotate(transform, glm::radians(45.0f * time), glm::vec3(0.0f, 1.0f, 0.0f));
-        transform = glm::scale(transform, glm::vec3(0.3f, 0.3f, 0.3f));
-        shader_data.model = transform;
-        push_const.update(frame_index, &shader_data);
+        ctx->acquire_command_buffer();
+        {
+            uint32_t frame_index = ctx->get_frame_index();
 
-        auto device_address = push_const.address(frame_index);
-        auto index_count = tank_mesh.data().indices.size();
+            auto transform = glm::mat4(1.0f);
 
-        ctx->draw(pipeline_layout, pipeline, descriptor_set.descriptor_set_, vertex_buffer.buffer_,
-                  index_buffer.buffer_,
-                  device_address, index_count);
+            transform = glm::translate(transform, glm::vec3(0.0f, 0.0f, 0.0f));
+            transform = glm::rotate(transform, glm::radians(45.0f * time), glm::vec3(0.0f, 1.0f, 0.0f));
+            transform = glm::scale(transform, glm::vec3(0.3f, 0.3f, 0.3f));
+            shader_data.model = transform;
+
+            push_const.update(frame_index, &shader_data); // upload data to buffer on GPU
+
+            ctx->begin_rendering();
+            {
+                ctx->bind_pipeline(pipeline);
+                ctx->bind_descriptor_set(pipeline_layout, descriptor_set.get());
+                ctx->bind_vertex_buffer(vertex_buffer.get());
+                ctx->bind_index_buffer(index_buffer.get());
+                ctx->cmd_push_constants(pipeline_layout, push_const.address(frame_index));
+                ctx->draw_indexed(tank_mesh.data().indices.size());
+            }
+            ctx->end_rendering();
+        }
+        ctx->submit();
     }
 
     return EXIT_SUCCESS;

@@ -30,27 +30,42 @@ int main(int argc, char *argv[]) {
     [[maybe_unused]] SDL_Window *window = ctx->create_window("Model Viewer", kWidth, kHeight);
 
     // load model
-    Mesh tank_mesh{};
-    tank_mesh.load_mesh(("assets/models/tank.glb"));
+    Mesh loaded_mesh{};
+    loaded_mesh.load_mesh(("assets/models/tank.glb"));
 
     // buffers for model
-    const VkDeviceSize v_buf_size = sizeof(Vertex) * tank_mesh.data().vertices.size();
-    const VkDeviceSize i_buf_size = sizeof(uint32_t) * tank_mesh.data().indices.size();
+    const VkDeviceSize v_buf_size = sizeof(Vertex) * loaded_mesh.data().vertices.size();
+    const VkDeviceSize i_buf_size = sizeof(uint32_t) * loaded_mesh.data().indices.size();
 
     // vertex buffer
+    BufferDesc v_buf_desc{
+        .context = ctx.get(),
+        .usage_flags = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        .size = v_buf_size
+    };
     Buffer vertex_buffer{};
-    vertex_buffer.create_buffer(ctx.get(), v_buf_size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-    vertex_buffer.update(tank_mesh.data().vertices.data());
+    vertex_buffer.create(v_buf_desc);
+    vertex_buffer.update(loaded_mesh.data().vertices.data());
 
     // index buffer
+    BufferDesc i_buf_desc{
+        .context = ctx.get(),
+        .usage_flags = VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        .size = i_buf_size
+    };
     Buffer index_buffer{};
-    index_buffer.create_buffer(ctx.get(), i_buf_size, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-    index_buffer.update(tank_mesh.data().indices.data());
+    index_buffer.create(i_buf_desc);
+    index_buffer.update(loaded_mesh.data().indices.data());
 
-    // shader data and its buffers
-    // ReSharper disable once CppTooWideScope
-    [[maybe_unused]] ShaderData shader_data{};
-    PerFrameBuffer<ShaderData> push_const{ctx.get()};
+    // per frame uniform buffer
+    BufferDesc u_buf_desc{
+        .context = ctx.get(),
+        .usage_flags = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        .size = sizeof(ShaderData),
+        .per_frame = true
+    };
+    Buffer uniform_buffer{};
+    uniform_buffer.create(u_buf_desc);
 
     // load shaders
     [[maybe_unused]] const VkShaderModule vert_shader = Shader::create_shader_module(ctx.get(),
@@ -99,7 +114,7 @@ int main(int argc, char *argv[]) {
     pipeline_builder.set_vertex_layout(vertex_binding, vertex_attributes);
     pipeline_builder.set_input_assembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
     pipeline_builder.set_viewport(1, 1, true);
-    pipeline_builder.set_rasterization(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE);
+    pipeline_builder.set_rasterization(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE);
     pipeline_builder.set_multisampling(VK_SAMPLE_COUNT_1_BIT);
     pipeline_builder.set_depth_stencil(true, true, VK_COMPARE_OP_LESS_OR_EQUAL);
     pipeline_builder.set_color_blend(1, 0xF);
@@ -127,9 +142,11 @@ int main(int argc, char *argv[]) {
         }
 
         // update shader data
+        ShaderData shader_data{};
         shader_data.projection = glm::perspective(glm::radians(45.0f),
                                                   1280.0f / 720.0f,
                                                   0.1f, 1000.0f);
+        shader_data.projection[1][1] *= -1.0f; // flip Y
 
         shader_data.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 3.0f),
                                        glm::vec3(0.0f, 0.0f, 0.0f),
@@ -145,10 +162,10 @@ int main(int argc, char *argv[]) {
 
             transform = glm::translate(transform, glm::vec3(0.0f, 0.0f, 0.0f));
             transform = glm::rotate(transform, glm::radians(45.0f * time), glm::vec3(0.0f, 1.0f, 0.0f));
-            transform = glm::scale(transform, glm::vec3(0.3f, 0.3f, 0.3f));
+            transform = glm::scale(transform, glm::vec3(1.0f, 1.0f, 1.0f));
             shader_data.model = transform;
 
-            push_const.update(frame_index, &shader_data); // upload data to buffer on GPU
+            uniform_buffer.update(&shader_data); // upload data to buffer on GPU
 
             // attachments
             Attachment scene_pass{};
@@ -173,8 +190,8 @@ int main(int argc, char *argv[]) {
                 ctx->bind_descriptor_set(pipeline_layout, descriptor_set.get());
                 ctx->bind_vertex_buffer(vertex_buffer.get());
                 ctx->bind_index_buffer(index_buffer.get());
-                ctx->cmd_push_constants(pipeline_layout, push_const.address(frame_index));
-                ctx->draw_indexed(tank_mesh.data().indices.size());
+                ctx->cmd_push_constants(pipeline_layout, uniform_buffer.address());
+                ctx->draw_indexed(loaded_mesh.data().indices.size());
             }
             ctx->end_rendering();
         }

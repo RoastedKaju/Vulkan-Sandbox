@@ -6,6 +6,7 @@
 #include "utils.h"
 
 void SwapChain::init_swap_chain(const Context *context, const VkFormat image_format) {
+    swap_chain_format_ = image_format;
     VkSurfaceCapabilitiesKHR surface_capabilities{};
     const auto result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(context->physical_device_,
                                                                   context->surface_,
@@ -26,7 +27,7 @@ void SwapChain::init_swap_chain(const Context *context, const VkFormat image_for
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .surface = context->surface_,
         .minImageCount = surface_capabilities.minImageCount,
-        .imageFormat = image_format,
+        .imageFormat = swap_chain_format_,
         .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
         .imageExtent{.width = swap_chain_extent.width, .height = swap_chain_extent.height},
         .imageArrayLayers = 1,
@@ -48,6 +49,8 @@ void SwapChain::init_swap_chain(const Context *context, const VkFormat image_for
         swap_chain_images_[i].image = images[i];
         swap_chain_images_[i].format = swap_chain_format_;
         swap_chain_images_[i].aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+        swap_chain_images_[i].width = swap_chain_extent.width;
+        swap_chain_images_[i].height = swap_chain_extent.height;
     }
 
     for (auto i = 0; i < image_count; ++i) {
@@ -55,7 +58,7 @@ void SwapChain::init_swap_chain(const Context *context, const VkFormat image_for
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
             .image = swap_chain_images_[i].image,
             .viewType = VK_IMAGE_VIEW_TYPE_2D,
-            .format = image_format,
+            .format = swap_chain_format_,
             .subresourceRange = {.aspectMask = swap_chain_images_[i].aspect, .levelCount = 1, .layerCount = 1}
         };
         check(vkCreateImageView(device, &image_view_create_info, nullptr, &swap_chain_images_[i].view));

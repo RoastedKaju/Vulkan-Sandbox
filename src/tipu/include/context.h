@@ -81,7 +81,7 @@ public:
 
     void submit();
 
-    std::unique_ptr<Image> load_texture(const std::filesystem::path &path);
+    std::unique_ptr<Image> load_texture(const std::filesystem::path &path, const glm::ivec3 &color);
 
     /**
      *

@@ -8,6 +8,7 @@
 #include <vma/vk_mem_alloc.h>
 
 #include "utils.h"
+#include "buffer.h"
 
 // debug callback
 // ReSharper disable once CppParameterMayBeConst
@@ -455,8 +456,8 @@ void Context::submit() {
     vkQueuePresentKHR(queue_, &present_info);
 }
 
-std::unique_ptr<Image> Context::load_texture(const std::filesystem::path &path) {
-    auto raw_color_data = make_solid_color_texture(4, 4, 255, 100, 100);
+std::unique_ptr<Image> Context::load_texture(const std::filesystem::path &path, const glm::ivec3 &color) {
+    const auto raw_color_data = make_solid_color_texture(4, 4, color.r, color.g, color.b);
 
     constexpr TextureDesc texture_desc{
         .dimension_ = {4, 4},
@@ -474,21 +475,16 @@ std::unique_ptr<Image> Context::load_texture(const std::filesystem::path &path) 
     auto image = create_texture(texture_desc);
 
     // Upload pixel data
-    VkBuffer buffer{};
-    VmaAllocation alloc{};
-    VkBufferCreateInfo buffer_create_info{
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+    const BufferDesc buf_desc{
+        .context = this,
+        .usage_flags = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         .size = raw_color_data.size(),
-        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+        .per_frame = false
     };
-    VmaAllocationCreateInfo alloc_create_info{
-        .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                 VMA_ALLOCATION_CREATE_MAPPED_BIT,
-        .usage = VMA_MEMORY_USAGE_AUTO
-    };
-    VmaAllocationInfo alloc_info{};
-    check(vmaCreateBuffer(allocator_, &buffer_create_info, &alloc_create_info, &buffer, &alloc, &alloc_info));
-    memcpy(alloc_info.pMappedData, raw_color_data.data(), raw_color_data.size());
+    Buffer data_buffer{};
+    data_buffer.create(buf_desc);
+    data_buffer.update(raw_color_data.data());
+
     constexpr VkFenceCreateInfo fence_one_time_create_info{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     VkFence fence_one_time{};
     check(vkCreateFence(device_, &fence_one_time_create_info, nullptr, &fence_one_time));
@@ -509,16 +505,16 @@ std::unique_ptr<Image> Context::load_texture(const std::filesystem::path &path) 
                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                      VK_ACCESS_2_TRANSFER_WRITE_BIT,
                      VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                     VK_IMAGE_ASPECT_COLOR_BIT); // level_count defaults to 1, correct here
+                     VK_IMAGE_ASPECT_COLOR_BIT); // TODO: Add level count depending on image
 
-    VkBufferImageCopy copy_region{
+    constexpr VkBufferImageCopy copy_region{
         .bufferOffset = 0,
         .imageSubresource{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
         .imageExtent{.width = texture_desc.dimension_[0], .height = texture_desc.dimension_[1], .depth = 1}
     };
     vkCmdCopyBufferToImage(
         cmd_buf_one_time,
-        buffer,
+        data_buffer.get(),
         image->image,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         1,
@@ -532,7 +528,7 @@ std::unique_ptr<Image> Context::load_texture(const std::filesystem::path &path) 
 
     check(vkEndCommandBuffer(cmd_buf_one_time));
 
-    VkSubmitInfo one_time_submit_info{
+    const VkSubmitInfo one_time_submit_info{
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
         .pCommandBuffers = &cmd_buf_one_time
@@ -542,7 +538,7 @@ std::unique_ptr<Image> Context::load_texture(const std::filesystem::path &path) 
 
     vkDestroyFence(device_, fence_one_time, nullptr);
     vkFreeCommandBuffers(device_, command_pool_, 1, &cmd_buf_one_time);
-    vmaDestroyBuffer(allocator_, buffer, alloc);
+    vmaDestroyBuffer(allocator_, data_buffer.get(), data_buffer.get_allocation());
 
     // Register into bindless descriptor array, store resulting slot on the image
     image->index = descriptor_registry_.register_texture(image->view, default_sampler_);

@@ -59,6 +59,15 @@ VkBuffer Buffer::get() const {
     return buffers_[0].buffer_;
 }
 
+VmaAllocation Buffer::get_allocation() const {
+    if (desc_.per_frame) {
+        const uint32_t current_frame_index = desc_.context->get_frame_index();
+        return buffers_[current_frame_index].allocation_;
+    }
+
+    return buffers_[0].allocation_;
+}
+
 VkDeviceAddress Buffer::address() const {
     if (desc_.per_frame) {
         const uint32_t current_frame_index = desc_.context->get_frame_index();

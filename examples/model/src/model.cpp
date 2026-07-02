@@ -36,7 +36,9 @@ int main(int argc, char *argv[]) {
     loaded_mesh.load_mesh(("assets/models/tank.glb"));
 
     // load texture
-    std::unique_ptr<Image> mesh_tex = ctx->load_texture("");
+    std::unique_ptr<Image> red_tex = ctx->load_texture("", glm::ivec3(255, 35, 20));
+    std::unique_ptr<Image> blue_tex = ctx->load_texture("", glm::ivec3(50, 20, 255));
+
 
     // buffers for model
     const VkDeviceSize v_buf_size = sizeof(Vertex) * loaded_mesh.data().vertices.size();
@@ -164,7 +166,7 @@ int main(int argc, char *argv[]) {
             transform = glm::rotate(transform, glm::radians(45.0f * time), glm::vec3(0.0f, 1.0f, 0.0f));
             transform = glm::scale(transform, glm::vec3(1.0f, 1.0f, 1.0f));
             shader_data.model = transform;
-            shader_data.tex_index = mesh_tex->index;
+            shader_data.tex_index = red_tex->index;
 
             uniform_buffer.update(&shader_data); // upload data to buffer on GPU
 

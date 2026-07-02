@@ -27,6 +27,8 @@ public:
     // Getter for raw Vulkan buffer
     VkBuffer get() const;
 
+    VmaAllocation get_allocation() const;
+
     // Getter for device address
     VkDeviceAddress address() const;
 

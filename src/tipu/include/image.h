@@ -26,5 +26,6 @@ struct Image {
     uint32_t height = 0;
     VmaAllocation allocation{VK_NULL_HANDLE};
     uint32_t index{std::numeric_limits<uint32_t>::max()};
+    VkDescriptorImageInfo texture_descriptor{};
     ImageState state{};
 };

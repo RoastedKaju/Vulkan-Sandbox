@@ -151,3 +151,15 @@ inline MeshData load_mesh_data(const tinygltf::Model &model, const tinygltf::Pri
 
     return mesh;
 }
+
+inline std::vector<uint8_t> make_solid_color_texture(const uint32_t w, const uint32_t h, const uint8_t r,
+                                                     const uint8_t g, const uint8_t b, const uint8_t a = 255) {
+    std::vector<uint8_t> data(w * h * 4);
+    for (size_t i = 0; i < w * h; ++i) {
+        data[i * 4 + 0] = r;
+        data[i * 4 + 1] = g;
+        data[i * 4 + 2] = b;
+        data[i * 4 + 3] = a;
+    }
+    return data;
+}

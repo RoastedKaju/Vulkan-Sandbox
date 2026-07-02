@@ -3,6 +3,7 @@
 #include <iostream>
 #include <vector>
 #include <memory>
+#include <filesystem>
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -15,6 +16,7 @@
 #include "frame.h"
 #include "swap_chain.h"
 #include "attachment.h"
+#include "descriptor.h"
 
 struct Config {
     std::string app_name_ = "default";
@@ -32,6 +34,7 @@ struct TextureDesc {
     VkImageUsageFlags usage_{0};
     VkImageAspectFlags aspect_{VK_IMAGE_ASPECT_COLOR_BIT};
     VkFormat format_ = VK_FORMAT_UNDEFINED;
+    bool prefer_dedicated_alloc_ = false;
 };
 
 class Context {
@@ -78,6 +81,8 @@ public:
 
     void submit();
 
+    std::unique_ptr<Image> load_texture(const std::filesystem::path &path);
+
     /**
      *
      * @return number of maximum frames in flight
@@ -88,6 +93,7 @@ public:
     uint32_t get_max_frame_count() const { return frame_data_.max_frames_in_flight_; }
     uint32_t get_frame_index() const { return frame_data_.frame_index_; }
     uint32_t get_image_index() const { return frame_data_.image_index_; }
+    DescriptorRegistry &get_texture_registry() { return descriptor_registry_; }
 
 private:
     bool create_instance(const char *app_name = "default");
@@ -104,7 +110,12 @@ private:
                                  VkImageLayout new_layout,
                                  VkAccessFlags2 new_access,
                                  VkPipelineStageFlags2 new_stage,
-                                 VkImageAspectFlags aspect);
+                                 VkImageAspectFlags aspect,
+                                 uint32_t level_count = 1,
+                                 uint32_t layer_count = 1,
+                                 uint32_t base_mip_level = 0);
+
+    void create_default_sampler();
 
     Config config_;
 
@@ -131,11 +142,16 @@ private:
     // swap-chain
     SwapChain swap_chain_;
 
+    // bindless texture descriptors
+    DescriptorRegistry descriptor_registry_;
+
     // pools
     VkCommandPool command_pool_{VK_NULL_HANDLE};
 
     // frame data
     FrameData frame_data_;
+
+    VkSampler default_sampler_{VK_NULL_HANDLE};
 
     friend class SwapChain;
     friend class Buffer;

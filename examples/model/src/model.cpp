@@ -7,7 +7,6 @@
 #include "buffer.h"
 #include "shader.h"
 #include "pipeline.h"
-#include "texture_descriptor_set.h"
 
 constexpr uint32_t kWidth = 1280u;
 constexpr uint32_t kHeight = 720u;
@@ -16,7 +15,10 @@ struct ShaderData {
     glm::mat4 projection;
     glm::mat4 view;
     glm::mat4 model;
+    uint32_t tex_index;
 };
+
+auto red_texture_data = make_solid_color_texture(4, 4, 255, 0, 0);
 
 int main(int argc, char *argv[]) {
     Config config{
@@ -32,6 +34,9 @@ int main(int argc, char *argv[]) {
     // load model
     Mesh loaded_mesh{};
     loaded_mesh.load_mesh(("assets/models/tank.glb"));
+
+    // load texture
+    std::unique_ptr<Image> mesh_tex = ctx->load_texture("");
 
     // buffers for model
     const VkDeviceSize v_buf_size = sizeof(Vertex) * loaded_mesh.data().vertices.size();
@@ -75,10 +80,6 @@ int main(int argc, char *argv[]) {
         "assets/shaders/frag.glsl",
         shaderc_fragment_shader);
 
-    // texture descriptor set
-    TextureDescriptorSet descriptor_set{};
-    descriptor_set.create(ctx->get_device(), 64);
-
     // create depth texture
     TextureDesc depth_tex_desc{};
     depth_tex_desc.dimension_ = {kWidth, kHeight};
@@ -89,11 +90,12 @@ int main(int argc, char *argv[]) {
     depth_tex_desc.format_ = ctx->get_device_depth_format();
     depth_tex_desc.tiling_ = VK_IMAGE_TILING_OPTIMAL;
     depth_tex_desc.usage_ = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    depth_tex_desc.prefer_dedicated_alloc_ = true;
     auto depth_texture = ctx->create_texture(depth_tex_desc);
 
     // create pipeline layout
     PipelineLayoutBuilder pipeline_layout_desc{};
-    pipeline_layout_desc.add_descriptor_set_layout(descriptor_set.layout());
+    pipeline_layout_desc.add_descriptor_set_layout(ctx->get_texture_registry().get_layout());
     pipeline_layout_desc.add_push_constant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(VkDeviceAddress));
     const VkPipelineLayout pipeline_layout = pipeline_layout_desc.build(ctx.get());
 
@@ -162,6 +164,7 @@ int main(int argc, char *argv[]) {
             transform = glm::rotate(transform, glm::radians(45.0f * time), glm::vec3(0.0f, 1.0f, 0.0f));
             transform = glm::scale(transform, glm::vec3(1.0f, 1.0f, 1.0f));
             shader_data.model = transform;
+            shader_data.tex_index = mesh_tex->index;
 
             uniform_buffer.update(&shader_data); // upload data to buffer on GPU
 
@@ -185,7 +188,7 @@ int main(int argc, char *argv[]) {
             ctx->begin_rendering(scene_pass, frame_buffer);
             {
                 ctx->bind_pipeline(pipeline);
-                ctx->bind_descriptor_set(pipeline_layout, descriptor_set.get());
+                ctx->bind_descriptor_set(pipeline_layout, ctx->get_texture_registry().get_set());
                 ctx->bind_vertex_buffer(vertex_buffer.get());
                 ctx->bind_index_buffer(index_buffer.get());
                 ctx->cmd_push_constants(pipeline_layout, uniform_buffer.address());

@@ -11,6 +11,7 @@ struct ShaderData {
     mat4 projection;
     mat4 view;
     mat4 model;
+    uint tex_index;
 };
 
 layout(buffer_reference, scalar) readonly buffer ShaderDataRef {
@@ -23,6 +24,7 @@ layout(location = 2) in vec2 inUV;
 
 layout(location = 0) out vec3 outNormal;
 layout(location = 1) out vec2 outUV;
+layout(location = 2) out flat uint outTexIndex;
 
 void main() {
     ShaderData sd = ShaderDataRef(address).data;
@@ -30,4 +32,5 @@ void main() {
     gl_Position = sd.projection * sd.view * sd.model * vec4(inPosition, 1.0);
     outNormal = mat3(sd.view * sd.model) * inNormal;
     outUV = inUV;
+    outTexIndex = sd.tex_index;
 }

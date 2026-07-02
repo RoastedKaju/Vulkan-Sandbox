@@ -1,48 +1,38 @@
 #pragma once
 
-// class DescriptorManager {
-// public:
-//     DescriptorManager(VkDevice device);
-//     ~DescriptorManager();
-//
-//     // Create a layout with arbitrary bindings
-//     VkDescriptorSetLayout createLayout(
-//         const std::vector<VkDescriptorSetLayoutBinding>& bindings,
-//         const std::vector<VkDescriptorBindingFlags>& bindingFlags = {}
-//     );
-//
-//     // Create a pool for a given set of sizes
-//     VkDescriptorPool createPool(
-//         const std::vector<VkDescriptorPoolSize>& poolSizes,
-//         uint32_t maxSets,
-//         VkDescriptorPoolCreateFlags flags = 0
-//     );
-//
-//     // Allocate a descriptor set
-//     VkDescriptorSet allocateSet(
-//         VkDescriptorPool pool,
-//         VkDescriptorSetLayout layout,
-//         uint32_t variableCount = 0
-//     );
-//
-//     // Update descriptors
-//     void updateImage(
-//         VkDescriptorSet set,
-//         uint32_t binding,
-//         uint32_t arrayElement,
-//         VkImageView view,
-//         VkSampler sampler,
-//         VkImageLayout layout
-//     );
-//
-//     void updateBuffer(
-//         VkDescriptorSet set,
-//         uint32_t binding,
-//         VkBuffer buffer,
-//         VkDeviceSize range,
-//         VkDescriptorType type
-//     );
-//
-// private:
-//     VkDevice m_device;
-// };
+#include <queue>
+
+#include <vulkan/vulkan.h>
+
+class DescriptorRegistry {
+public:
+    static constexpr uint32_t kMaxTextureCount = 1024;
+
+    DescriptorRegistry() = default;
+
+    void init(VkDevice device);
+
+    void destroy() const;
+
+    uint32_t register_texture(VkImageView view, VkSampler sampler);
+
+    void free_texture(uint32_t index);
+
+    VkDescriptorPool get_pool() const { return pool_; }
+    VkDescriptorSetLayout get_layout() const { return layout_; }
+    VkDescriptorSet get_set() const { return set_; };
+
+private:
+    void create_pool();
+    void create_layout();
+    void allocate_descriptor_set();
+
+    VkDevice device_{VK_NULL_HANDLE};
+    VkDescriptorPool pool_{VK_NULL_HANDLE};
+    VkDescriptorSetLayout layout_{VK_NULL_HANDLE};
+    VkDescriptorSet set_{VK_NULL_HANDLE};
+
+    // index tracking
+    std::queue<uint32_t> free_indices_;
+    uint32_t next_index_{0};
+};

@@ -33,6 +33,7 @@ Context::~Context() {
 bool Context::initialize() {
     create_instance(config_.app_name_.c_str());
     setup_device();
+    create_default_sampler();
 
     return true;
 }
@@ -183,6 +184,9 @@ SDL_Window *Context::create_window(const char *title, const uint32_t width, cons
     check(SDL_Vulkan_CreateSurface(window, instance_, nullptr, &surface_));
     check(SDL_GetWindowSize(window, &window_size_.x, &window_size_.y));
 
+    // initialize bindless texture registry
+    descriptor_registry_.init(device_);
+
     // initialize swap chain
     create_swap_chain();
     create_frame_resources();
@@ -209,8 +213,8 @@ std::unique_ptr<Image> Context::create_texture(const TextureDesc &desc) const {
         .usage = desc.usage_,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
     };
-    constexpr VmaAllocationCreateInfo alloc_create_info{
-        .flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT,
+    const VmaAllocationCreateInfo alloc_create_info{
+        .flags = desc.prefer_dedicated_alloc_ ? VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT : 0u,
         .usage = VMA_MEMORY_USAGE_AUTO
     };
     check(vmaCreateImage(
@@ -381,7 +385,11 @@ void Context::bind_index_buffer(const VkBuffer buffer) const {
 void Context::cmd_push_constants(const VkPipelineLayout pipeline_layout, const VkDeviceAddress address) const {
     const uint32_t frame_index = frame_data_.frame_index_;
     const auto cmd = frame_data_.command_buffers_[frame_index];
-    vkCmdPushConstants(cmd, pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VkDeviceAddress), &address);
+    vkCmdPushConstants(cmd,
+                       pipeline_layout,
+                       VK_SHADER_STAGE_VERTEX_BIT,
+                       0,
+                       sizeof(VkDeviceAddress), &address);
 }
 
 void Context::draw_indexed(const uint32_t index_count) const {
@@ -390,8 +398,7 @@ void Context::draw_indexed(const uint32_t index_count) const {
     vkCmdDrawIndexed(cmd, index_count, 1, 0, 0, 0);
 }
 
-void Context::draw(uint32_t vertex_count) const
-{
+void Context::draw(uint32_t vertex_count) const {
     const uint32_t frame_index = frame_data_.frame_index_;
     const auto cmd = frame_data_.command_buffers_[frame_index];
     vkCmdDraw(cmd, 3, 1, 0, 0);
@@ -448,6 +455,101 @@ void Context::submit() {
     vkQueuePresentKHR(queue_, &present_info);
 }
 
+std::unique_ptr<Image> Context::load_texture(const std::filesystem::path &path) {
+    auto raw_color_data = make_solid_color_texture(4, 4, 255, 100, 100);
+
+    constexpr TextureDesc texture_desc{
+        .dimension_ = {4, 4},
+        .depth_ = 1,
+        .mip_levels_ = 1,
+        .array_layers_ = 1,
+        .samples_ = VK_SAMPLE_COUNT_1_BIT,
+        .tiling_ = VK_IMAGE_TILING_OPTIMAL,
+        .usage_ = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .aspect_ = VK_IMAGE_ASPECT_COLOR_BIT,
+        .format_ = VK_FORMAT_R8G8B8A8_UNORM,
+        .prefer_dedicated_alloc_ = false
+    };
+
+    auto image = create_texture(texture_desc);
+
+    // Upload pixel data
+    VkBuffer buffer{};
+    VmaAllocation alloc{};
+    VkBufferCreateInfo buffer_create_info{
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = raw_color_data.size(),
+        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+    };
+    VmaAllocationCreateInfo alloc_create_info{
+        .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                 VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        .usage = VMA_MEMORY_USAGE_AUTO
+    };
+    VmaAllocationInfo alloc_info{};
+    check(vmaCreateBuffer(allocator_, &buffer_create_info, &alloc_create_info, &buffer, &alloc, &alloc_info));
+    memcpy(alloc_info.pMappedData, raw_color_data.data(), raw_color_data.size());
+    constexpr VkFenceCreateInfo fence_one_time_create_info{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkFence fence_one_time{};
+    check(vkCreateFence(device_, &fence_one_time_create_info, nullptr, &fence_one_time));
+    VkCommandBuffer cmd_buf_one_time{};
+    VkCommandBufferAllocateInfo cmd_buf_alloc_info{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = command_pool_,
+        .commandBufferCount = 1
+    };
+    check(vkAllocateCommandBuffers(device_, &cmd_buf_alloc_info, &cmd_buf_one_time));
+    constexpr VkCommandBufferBeginInfo cmd_buf_one_time_begin{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
+    check(vkBeginCommandBuffer(cmd_buf_one_time, &cmd_buf_one_time_begin));
+
+    transition_image(cmd_buf_one_time, image->image, image->state,
+                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                     VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                     VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                     VK_IMAGE_ASPECT_COLOR_BIT); // level_count defaults to 1, correct here
+
+    VkBufferImageCopy copy_region{
+        .bufferOffset = 0,
+        .imageSubresource{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
+        .imageExtent{.width = texture_desc.dimension_[0], .height = texture_desc.dimension_[1], .depth = 1}
+    };
+    vkCmdCopyBufferToImage(
+        cmd_buf_one_time,
+        buffer,
+        image->image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1,
+        &copy_region);
+
+    transition_image(cmd_buf_one_time, image->image, image->state,
+                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                     VK_ACCESS_2_SHADER_READ_BIT,
+                     VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                     VK_IMAGE_ASPECT_COLOR_BIT);
+
+    check(vkEndCommandBuffer(cmd_buf_one_time));
+
+    VkSubmitInfo one_time_submit_info{
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd_buf_one_time
+    };
+    check(vkQueueSubmit(queue_, 1, &one_time_submit_info, fence_one_time));
+    check(vkWaitForFences(device_, 1, &fence_one_time, VK_TRUE, UINT64_MAX));
+
+    vkDestroyFence(device_, fence_one_time, nullptr);
+    vkFreeCommandBuffers(device_, command_pool_, 1, &cmd_buf_one_time);
+    vmaDestroyBuffer(allocator_, buffer, alloc);
+
+    // Register into bindless descriptor array, store resulting slot on the image
+    image->index = descriptor_registry_.register_texture(image->view, default_sampler_);
+
+    return image;
+}
+
 void Context::create_swap_chain() {
     swap_chain_.init_swap_chain(this);
 }
@@ -490,7 +592,10 @@ void Context::transition_image(const VkCommandBuffer cmd,
                                const VkImageLayout new_layout,
                                const VkAccessFlags2 new_access,
                                const VkPipelineStageFlags2 new_stage,
-                               const VkImageAspectFlags aspect) {
+                               const VkImageAspectFlags aspect,
+                               const uint32_t level_count,
+                               const uint32_t layer_count,
+                               const uint32_t base_mip_level) {
     if (state.layout == new_layout && state.access == new_access) {
         return;
     }
@@ -504,7 +609,13 @@ void Context::transition_image(const VkCommandBuffer cmd,
         .oldLayout = state.layout,
         .newLayout = new_layout,
         .image = image,
-        .subresourceRange{.aspectMask = aspect, .levelCount = 1, .layerCount = 1}
+        .subresourceRange{
+            .aspectMask = aspect,
+            .baseMipLevel = base_mip_level,
+            .levelCount = level_count,
+            .baseArrayLayer = 0,
+            .layerCount = layer_count
+        }
     };
     const VkDependencyInfo dep_info{
         .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
@@ -514,4 +625,19 @@ void Context::transition_image(const VkCommandBuffer cmd,
     vkCmdPipelineBarrier2(cmd, &dep_info);
 
     state = {new_layout, new_access, new_stage};
+}
+
+void Context::create_default_sampler() {
+    // Sampler
+    constexpr VkSamplerCreateInfo create_info{
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        .anisotropyEnable = VK_TRUE,
+        .maxAnisotropy = 8.0f,
+        .minLod = 0.0f,
+        .maxLod = VK_LOD_CLAMP_NONE
+    };
+    check(vkCreateSampler(device_, &create_info, nullptr, &default_sampler_));
 }

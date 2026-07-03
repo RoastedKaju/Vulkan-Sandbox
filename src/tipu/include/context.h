@@ -57,6 +57,8 @@ public:
 
     std::unique_ptr<Image> create_texture(const TextureDesc &desc) const;
 
+    std::unique_ptr<Image> load_texture(const std::filesystem::path &path, const glm::ivec3 &color);
+
     VkFormat get_device_depth_format() const;
 
     void acquire_command_buffer();
@@ -81,12 +83,20 @@ public:
 
     void submit();
 
-    std::unique_ptr<Image> load_texture(const std::filesystem::path &path, const glm::ivec3 &color);
-
     // gets new window size
     void update_window_size();
 
     void recreate_swap_chain();
+
+    void deinit();
+
+    void destroy_pipeline(VkPipelineLayout layout, VkPipeline pipeline) const;
+
+    void destroy_image(const Image &image) const;
+
+    void destory_shader(VkShaderModule shader_module) const;
+
+    void destroy() const;
 
     /**
      *

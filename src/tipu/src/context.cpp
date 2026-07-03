@@ -240,6 +240,96 @@ std::unique_ptr<Image> Context::create_texture(const TextureDesc &desc) const {
     return image;
 }
 
+std::unique_ptr<Image> Context::load_texture(const std::filesystem::path &path, const glm::ivec3 &color) {
+    const auto raw_color_data = make_solid_color_texture(4, 4, color.r, color.g, color.b);
+
+    constexpr TextureDesc texture_desc{
+        .dimension_ = {4, 4},
+        .depth_ = 1,
+        .mip_levels_ = 1,
+        .array_layers_ = 1,
+        .samples_ = VK_SAMPLE_COUNT_1_BIT,
+        .tiling_ = VK_IMAGE_TILING_OPTIMAL,
+        .usage_ = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .aspect_ = VK_IMAGE_ASPECT_COLOR_BIT,
+        .format_ = VK_FORMAT_R8G8B8A8_UNORM,
+        .prefer_dedicated_alloc_ = false
+    };
+
+    auto image = create_texture(texture_desc);
+
+    // Upload pixel data
+    const BufferDesc buf_desc{
+        .context = this,
+        .usage_flags = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        .size = raw_color_data.size(),
+        .per_frame = false
+    };
+    Buffer data_buffer{};
+    data_buffer.create(buf_desc);
+    data_buffer.update(raw_color_data.data());
+
+    constexpr VkFenceCreateInfo fence_one_time_create_info{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkFence fence_one_time{};
+    check(vkCreateFence(device_, &fence_one_time_create_info, nullptr, &fence_one_time));
+    VkCommandBuffer cmd_buf_one_time{};
+    VkCommandBufferAllocateInfo cmd_buf_alloc_info{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = command_pool_,
+        .commandBufferCount = 1
+    };
+    check(vkAllocateCommandBuffers(device_, &cmd_buf_alloc_info, &cmd_buf_one_time));
+    constexpr VkCommandBufferBeginInfo cmd_buf_one_time_begin{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
+    check(vkBeginCommandBuffer(cmd_buf_one_time, &cmd_buf_one_time_begin));
+
+    transition_image(cmd_buf_one_time, image->image, image->state,
+                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                     VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                     VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                     VK_IMAGE_ASPECT_COLOR_BIT); // TODO: Add level count depending on image
+
+    constexpr VkBufferImageCopy copy_region{
+        .bufferOffset = 0,
+        .imageSubresource{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
+        .imageExtent{.width = texture_desc.dimension_[0], .height = texture_desc.dimension_[1], .depth = 1}
+    };
+    vkCmdCopyBufferToImage(
+        cmd_buf_one_time,
+        data_buffer.get(),
+        image->image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1,
+        &copy_region);
+
+    transition_image(cmd_buf_one_time, image->image, image->state,
+                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                     VK_ACCESS_2_SHADER_READ_BIT,
+                     VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                     VK_IMAGE_ASPECT_COLOR_BIT);
+
+    check(vkEndCommandBuffer(cmd_buf_one_time));
+
+    const VkSubmitInfo one_time_submit_info{
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd_buf_one_time
+    };
+    check(vkQueueSubmit(queue_, 1, &one_time_submit_info, fence_one_time));
+    check(vkWaitForFences(device_, 1, &fence_one_time, VK_TRUE, UINT64_MAX));
+
+    vkDestroyFence(device_, fence_one_time, nullptr);
+    vkFreeCommandBuffers(device_, command_pool_, 1, &cmd_buf_one_time);
+    vmaDestroyBuffer(allocator_, data_buffer.get(), data_buffer.get_allocation());
+
+    // Register into bindless descriptor array, store resulting slot on the image
+    image->index = descriptor_registry_.register_texture(image->view, default_sampler_);
+
+    return image;
+}
+
 VkFormat Context::get_device_depth_format() const {
     // ReSharper disable once CppTooWideScopeInitStatement
     std::vector<VkFormat> depth_format_list{VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT};
@@ -455,102 +545,64 @@ void Context::submit() {
     vkQueuePresentKHR(queue_, &present_info);
 }
 
-std::unique_ptr<Image> Context::load_texture(const std::filesystem::path &path, const glm::ivec3 &color) {
-    const auto raw_color_data = make_solid_color_texture(4, 4, color.r, color.g, color.b);
-
-    constexpr TextureDesc texture_desc{
-        .dimension_ = {4, 4},
-        .depth_ = 1,
-        .mip_levels_ = 1,
-        .array_layers_ = 1,
-        .samples_ = VK_SAMPLE_COUNT_1_BIT,
-        .tiling_ = VK_IMAGE_TILING_OPTIMAL,
-        .usage_ = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        .aspect_ = VK_IMAGE_ASPECT_COLOR_BIT,
-        .format_ = VK_FORMAT_R8G8B8A8_UNORM,
-        .prefer_dedicated_alloc_ = false
-    };
-
-    auto image = create_texture(texture_desc);
-
-    // Upload pixel data
-    const BufferDesc buf_desc{
-        .context = this,
-        .usage_flags = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        .size = raw_color_data.size(),
-        .per_frame = false
-    };
-    Buffer data_buffer{};
-    data_buffer.create(buf_desc);
-    data_buffer.update(raw_color_data.data());
-
-    constexpr VkFenceCreateInfo fence_one_time_create_info{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    VkFence fence_one_time{};
-    check(vkCreateFence(device_, &fence_one_time_create_info, nullptr, &fence_one_time));
-    VkCommandBuffer cmd_buf_one_time{};
-    VkCommandBufferAllocateInfo cmd_buf_alloc_info{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = command_pool_,
-        .commandBufferCount = 1
-    };
-    check(vkAllocateCommandBuffers(device_, &cmd_buf_alloc_info, &cmd_buf_one_time));
-    constexpr VkCommandBufferBeginInfo cmd_buf_one_time_begin{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
-    };
-    check(vkBeginCommandBuffer(cmd_buf_one_time, &cmd_buf_one_time_begin));
-
-    transition_image(cmd_buf_one_time, image->image, image->state,
-                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                     VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                     VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                     VK_IMAGE_ASPECT_COLOR_BIT); // TODO: Add level count depending on image
-
-    constexpr VkBufferImageCopy copy_region{
-        .bufferOffset = 0,
-        .imageSubresource{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
-        .imageExtent{.width = texture_desc.dimension_[0], .height = texture_desc.dimension_[1], .depth = 1}
-    };
-    vkCmdCopyBufferToImage(
-        cmd_buf_one_time,
-        data_buffer.get(),
-        image->image,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        1,
-        &copy_region);
-
-    transition_image(cmd_buf_one_time, image->image, image->state,
-                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                     VK_ACCESS_2_SHADER_READ_BIT,
-                     VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                     VK_IMAGE_ASPECT_COLOR_BIT);
-
-    check(vkEndCommandBuffer(cmd_buf_one_time));
-
-    const VkSubmitInfo one_time_submit_info{
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &cmd_buf_one_time
-    };
-    check(vkQueueSubmit(queue_, 1, &one_time_submit_info, fence_one_time));
-    check(vkWaitForFences(device_, 1, &fence_one_time, VK_TRUE, UINT64_MAX));
-
-    vkDestroyFence(device_, fence_one_time, nullptr);
-    vkFreeCommandBuffers(device_, command_pool_, 1, &cmd_buf_one_time);
-    vmaDestroyBuffer(allocator_, data_buffer.get(), data_buffer.get_allocation());
-
-    // Register into bindless descriptor array, store resulting slot on the image
-    image->index = descriptor_registry_.register_texture(image->view, default_sampler_);
-
-    return image;
-}
-
 void Context::update_window_size() {
     check(SDL_GetWindowSize(window_, &window_size_.x, &window_size_.y));
 }
 
 void Context::recreate_swap_chain() {
     swap_chain_.recreate_swap_chain(this);
+}
+
+void Context::deinit() {
+    check(vkDeviceWaitIdle(device_));
+
+    for (auto i = 0; i < frame_data_.max_frames_in_flight_; ++i) {
+        vkDestroyFence(device_, frame_data_.fences_[i], nullptr);
+        vkDestroySemaphore(device_, frame_data_.image_acquired_semaphores_[i], nullptr);
+    }
+    for (auto i = 0; i < frame_data_.render_complete_semaphores_.size(); ++i) {
+        vkDestroySemaphore(device_, frame_data_.render_complete_semaphores_[i], nullptr);
+    }
+    for (auto i = 0; i < swap_chain_.get_images().size(); ++i) {
+        vkDestroyImageView(device_, swap_chain_.get_images()[i].view, nullptr);
+    }
+
+    // destroy texture registry
+    vkDestroyDescriptorSetLayout(device_, descriptor_registry_.get_layout(), nullptr);
+    vkDestroyDescriptorPool(device_, descriptor_registry_.get_pool(), nullptr);
+
+    vkDestroySwapchainKHR(device_, swap_chain_.get(), nullptr);
+    vkDestroySurfaceKHR(instance_, surface_, nullptr);
+    vkDestroyCommandPool(device_, command_pool_, nullptr);
+
+    vkDestroySampler(device_, default_sampler_, nullptr);
+}
+
+void Context::destroy_pipeline(const VkPipelineLayout layout, const VkPipeline pipeline) const {
+    vkDestroyPipelineLayout(device_, layout, nullptr);
+    vkDestroyPipeline(device_, pipeline, nullptr);
+}
+
+void Context::destroy_image(const Image &image) const {
+    vkDestroyImageView(device_, image.view, nullptr);
+    // TODO: Destroy sampler if have per image sampler
+    vmaDestroyImage(allocator_, image.image, image.allocation);
+}
+
+void Context::destory_shader(const VkShaderModule shader_module) const {
+    vkDestroyShaderModule(device_, shader_module, nullptr);
+}
+
+void Context::destroy() const {
+    vmaDestroyAllocator(allocator_);
+
+    SDL_DestroyWindow(window_);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    SDL_Quit();
+
+    vkDestroyDevice(device_, nullptr);
+    vkDestroyDebugUtilsMessengerEXT(instance_, debug_messenger_, nullptr);
+    vkDestroyInstance(instance_, nullptr);
 }
 
 void Context::create_swap_chain() {

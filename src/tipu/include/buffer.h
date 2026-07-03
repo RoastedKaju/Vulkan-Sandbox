@@ -24,6 +24,8 @@ public:
 
     void update(const void *src) const;
 
+    void destroy() const;
+
     // Getter for raw Vulkan buffer
     VkBuffer get() const;
 

@@ -50,6 +50,12 @@ void Buffer::update(const void *src) const {
     memcpy(buffers_[0].allocation_info_.pMappedData, src, buffers_[0].size_);
 }
 
+void Buffer::destroy() const {
+    for (auto &buffer: buffers_) {
+        vmaDestroyBuffer(desc_.context->allocator_, buffer.buffer_, buffer.allocation_);
+    }
+}
+
 VkBuffer Buffer::get() const {
     if (desc_.per_frame) {
         const uint32_t current_frame_index = desc_.context->get_frame_index();

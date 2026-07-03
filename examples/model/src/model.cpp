@@ -12,13 +12,11 @@ constexpr uint32_t kWidth = 1280u;
 constexpr uint32_t kHeight = 720u;
 
 struct ShaderData {
-    glm::mat4 projection;
-    glm::mat4 view;
-    glm::mat4 model;
-    uint32_t tex_index;
+    glm::mat4 projection_;
+    glm::mat4 view_;
+    glm::mat4 model_;
+    uint32_t tex_index_;
 };
-
-auto red_texture_data = make_solid_color_texture(4, 4, 255, 0, 0);
 
 int main(int argc, char *argv[]) {
     Config config{
@@ -26,7 +24,6 @@ int main(int argc, char *argv[]) {
         .present_mode_ = VK_PRESENT_MODE_FIFO_KHR,
         .enable_validation_ = true
     };
-
     const auto ctx = std::make_unique<Context>(config);
     ctx->initialize();
     [[maybe_unused]] SDL_Window *window = ctx->create_window("Model Viewer", kWidth, kHeight);
@@ -38,7 +35,6 @@ int main(int argc, char *argv[]) {
     // load texture
     std::unique_ptr<Image> red_tex = ctx->load_texture("", glm::ivec3(255, 35, 20));
     std::unique_ptr<Image> blue_tex = ctx->load_texture("", glm::ivec3(50, 20, 255));
-
 
     // buffers for model
     const VkDeviceSize v_buf_size = sizeof(Vertex) * loaded_mesh.data().vertices.size();
@@ -147,14 +143,14 @@ int main(int argc, char *argv[]) {
 
         // update shader data
         ShaderData shader_data{};
-        shader_data.projection = glm::perspective(glm::radians(45.0f),
-                                                  1280.0f / 720.0f,
-                                                  0.1f, 1000.0f);
-        shader_data.projection[1][1] *= -1.0f; // flip Y
+        shader_data.projection_ = glm::perspective(glm::radians(45.0f),
+                                                   1280.0f / 720.0f,
+                                                   0.1f, 1000.0f);
+        shader_data.projection_[1][1] *= -1.0f; // flip Y
 
-        shader_data.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 3.0f),
-                                       glm::vec3(0.0f, 0.0f, 0.0f),
-                                       glm::vec3(0.0f, 1.0f, 0.0f));
+        shader_data.view_ = glm::lookAt(glm::vec3(0.0f, 0.0f, 3.0f),
+                                        glm::vec3(0.0f, 0.0f, 0.0f),
+                                        glm::vec3(0.0f, 1.0f, 0.0f));
 
         auto time = SDL_GetTicks() / 1000.0f;
 
@@ -165,8 +161,8 @@ int main(int argc, char *argv[]) {
             transform = glm::translate(transform, glm::vec3(0.0f, 0.0f, 0.0f));
             transform = glm::rotate(transform, glm::radians(45.0f * time), glm::vec3(0.0f, 1.0f, 0.0f));
             transform = glm::scale(transform, glm::vec3(1.0f, 1.0f, 1.0f));
-            shader_data.model = transform;
-            shader_data.tex_index = red_tex->index;
+            shader_data.model_ = transform;
+            shader_data.tex_index_ = red_tex->index;
 
             uniform_buffer.update(&shader_data); // upload data to buffer on GPU
 
@@ -207,6 +203,21 @@ int main(int argc, char *argv[]) {
             depth_texture = ctx->create_texture(depth_tex_desc);
         }
     }
+
+    // waits for device to be idle
+    ctx->deinit();
+    // clean up resources
+    vertex_buffer.destroy();
+    index_buffer.destroy();
+    uniform_buffer.destroy();
+    ctx->destroy_pipeline(pipeline_layout, pipeline);
+    ctx->destory_shader(vert_shader);
+    ctx->destory_shader(frag_shader);
+    ctx->destroy_image(*depth_texture.get());
+    ctx->destroy_image(*red_tex.get());
+    ctx->destroy_image(*blue_tex.get());
+    // destroy window, instance and device
+    ctx->destroy();
 
     return EXIT_SUCCESS;
 }

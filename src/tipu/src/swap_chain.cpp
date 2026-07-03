@@ -151,7 +151,7 @@ void SwapChain::recreate_swap_chain(Context *context) {
     swap_chain_create_info.oldSwapchain = swap_chain_;
 
     check(vkCreateSwapchainKHR(context->device_, &swap_chain_create_info, nullptr, &swap_chain_));
-    // destroy old images
+    // destroy old image views
     for (auto i = 0; i < swap_chain_images_.size(); i++) {
         vkDestroyImageView(context->device_, swap_chain_images_[i].view, nullptr);
     }

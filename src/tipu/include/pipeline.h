@@ -61,7 +61,9 @@ public:
 
     PipelineBuilder &set_viewport(uint32_t viewport_count, uint32_t scissor_count, bool dynamic = true);
 
-    PipelineBuilder &set_rasterization(VkCullModeFlags cull, VkFrontFace front);
+    PipelineBuilder &set_rasterization(VkCullModeFlags cull,
+                                       VkFrontFace front,
+                                       VkPolygonMode polygon_mode = VK_POLYGON_MODE_FILL);
 
     PipelineBuilder &set_multisampling(VkSampleCountFlagBits samples);
 

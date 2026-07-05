@@ -63,7 +63,7 @@ public:
 
     void acquire_command_buffer();
 
-    void begin_rendering(const Attachment &attachment, const FrameBuffer &frame_buffer);
+    void begin_rendering(const Attachment &attachment, const FrameBuffer &frame_buffer) const;
 
     void bind_pipeline(VkPipeline pipeline) const;
 
@@ -88,15 +88,19 @@ public:
 
     void recreate_swap_chain();
 
-    void deinit();
+    void wait_idle();
 
-    void destroy_pipeline(VkPipelineLayout layout, VkPipeline pipeline) const;
+    void destroy_pipeline_layout(VkPipelineLayout layout) const;
 
-    void destroy_image(Image &image) const;
+    void destroy_pipeline(VkPipeline pipeline) const;
+
+    void destroy_image(const Image *image) const;
 
     void destory_shader(VkShaderModule shader_module) const;
 
     void destroy() const;
+
+    Image *get_current_swap_chain_image();
 
     /**
      *

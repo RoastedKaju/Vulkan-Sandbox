@@ -142,9 +142,12 @@ PipelineBuilder &PipelineBuilder::set_viewport(const uint32_t viewport_count,
     return *this;
 }
 
-PipelineBuilder &PipelineBuilder::set_rasterization(const VkCullModeFlags cull, const VkFrontFace front) {
+PipelineBuilder &PipelineBuilder::set_rasterization(const VkCullModeFlags cull,
+                                                    const VkFrontFace front,
+                                                    const VkPolygonMode polygon_mode) {
     rasterization_state_ = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = polygon_mode,
         .cullMode = cull,
         .frontFace = front,
         .lineWidth = 1.0f

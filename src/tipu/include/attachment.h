@@ -35,6 +35,6 @@ private:
 };
 
 struct FrameBuffer {
-    // TODO: add array for max color attachments here
-    Image* depth_image_;
+    std::array<Image *, Attachment::kMaxColorAttachments> color_images_{};
+    Image *depth_image_;
 };

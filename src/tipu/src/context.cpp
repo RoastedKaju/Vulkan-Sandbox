@@ -141,8 +141,9 @@ bool Context::setup_device(const uint32_t device_index) {
         .dynamicRendering = true
     };
     VkPhysicalDeviceFeatures enabled_features_10{
+        .fillModeNonSolid = VK_TRUE,
         .samplerAnisotropy = VK_TRUE,
-        .shaderInt64 = VK_TRUE
+        .shaderInt64 = VK_TRUE,
     };
 
     const std::vector<const char *> device_extensions{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
@@ -393,10 +394,8 @@ void Context::acquire_command_buffer() {
     }
 }
 
-void Context::begin_rendering(const Attachment &attachment, const FrameBuffer &frame_buffer) {
+void Context::begin_rendering(const Attachment &attachment, const FrameBuffer &frame_buffer) const {
     const uint32_t frame_index = frame_data_.frame_index_;
-    const uint32_t image_index = frame_data_.image_index_;
-    auto &current_swap_chain_image = swap_chain_.get_images()[image_index];
 
     const auto cmd = frame_data_.command_buffers_[frame_index];
 
@@ -408,23 +407,27 @@ void Context::begin_rendering(const Attachment &attachment, const FrameBuffer &f
     };
     check(vkBeginCommandBuffer(cmd, &cmd_begin_info));
 
-    // for swap chain image
-    transition_image(cmd, current_swap_chain_image, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-                     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
-                     VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
-
-    // for depth image
+    // transition for depth image
     if (attachment.has_depth()) {
         transition_image(cmd, *frame_buffer.depth_image_, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
                          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                          VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT);
     }
 
+    // transition for color attachments
+    for (uint32_t i = 0; i < attachment.color_count(); ++i) {
+        if (frame_buffer.color_images_[i]) {
+            transition_image(cmd, *frame_buffer.color_images_[i], VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                             VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
+                             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+        }
+    }
+
     // rendering attachments
     std::array<VkRenderingAttachmentInfo, Attachment::kMaxColorAttachments> resolved_colors{};
     for (uint32_t i = 0; i < attachment.color_count(); ++i) {
         resolved_colors[i] = attachment.color(i);
-        resolved_colors[i].imageView = swap_chain_.get_images()[image_index].view_;
+        resolved_colors[i].imageView = frame_buffer.color_images_[i]->view_;
     }
 
     VkRenderingAttachmentInfo resolved_depth = attachment.depth();
@@ -572,7 +575,7 @@ void Context::recreate_swap_chain() {
     swap_chain_.recreate_swap_chain(this);
 }
 
-void Context::deinit() {
+void Context::wait_idle() {
     check(vkDeviceWaitIdle(device_));
 
     for (auto i = 0; i < frame_data_.max_frames_in_flight_; ++i) {
@@ -597,19 +600,21 @@ void Context::deinit() {
     vkDestroySampler(device_, default_sampler_, nullptr);
 }
 
-void Context::destroy_pipeline(const VkPipelineLayout layout, const VkPipeline pipeline) const {
+void Context::destroy_pipeline_layout(const VkPipelineLayout layout) const {
     vkDestroyPipelineLayout(device_, layout, nullptr);
+}
+
+void Context::destroy_pipeline(const VkPipeline pipeline) const {
     vkDestroyPipeline(device_, pipeline, nullptr);
 }
 
-void Context::destroy_image(Image &image) const {
-    if (image.view_ != VK_NULL_HANDLE) {
-        vkDestroyImageView(device_, image.view_, nullptr);
+void Context::destroy_image(const Image *image) const {
+    if (image->view_ != VK_NULL_HANDLE) {
+        vkDestroyImageView(device_, image->view_, nullptr);
     }
-    if (image.image_ != VK_NULL_HANDLE && image.allocation_ != VK_NULL_HANDLE) {
-        vmaDestroyImage(allocator_, image.image_, image.allocation_);
+    if (image->image_ != VK_NULL_HANDLE && image->allocation_ != VK_NULL_HANDLE) {
+        vmaDestroyImage(allocator_, image->image_, image->allocation_);
     }
-    image = Image{};
 }
 
 void Context::destory_shader(const VkShaderModule shader_module) const {
@@ -626,6 +631,11 @@ void Context::destroy() const {
     vkDestroyDevice(device_, nullptr);
     vkDestroyDebugUtilsMessengerEXT(instance_, debug_messenger_, nullptr);
     vkDestroyInstance(instance_, nullptr);
+}
+
+Image *Context::get_current_swap_chain_image() {
+    const uint32_t image_index = frame_data_.image_index_;
+    return &swap_chain_.get_images()[image_index];
 }
 
 void Context::create_swap_chain() {

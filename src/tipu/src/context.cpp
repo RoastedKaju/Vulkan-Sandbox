@@ -205,6 +205,7 @@ std::unique_ptr<Image> Context::create_texture(const TextureDesc &desc) const {
     image->depth_ = desc.depth_;
     image->format_ = desc.format_;
     image->aspect_ = desc.aspect_;
+    image->type_ = desc.type_;
     image->usage_ = desc.usage_;
     image->mip_levels_ = desc.mip_levels_;
     image->array_layers_ = desc.array_layers_;
@@ -212,7 +213,7 @@ std::unique_ptr<Image> Context::create_texture(const TextureDesc &desc) const {
 
     const VkImageCreateInfo image_create_info{
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
+        .imageType = image->type_,
         .format = image->format_,
         .extent{.width = image->width_, .height = image->height_, .depth = image->depth_},
         .mipLevels = image->mip_levels_,
@@ -477,10 +478,11 @@ void Context::bind_pipeline(const VkPipeline pipeline) const {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 }
 
-void Context::bind_descriptor_set(const VkPipelineLayout pipeline_layout, const VkDescriptorSet descriptor_set) const {
+void Context::bind_descriptor_set(const PipelineLayout &pipeline_layout, const VkDescriptorSet descriptor_set) const {
     const uint32_t frame_index = frame_data_.frame_index_;
     const auto cmd = frame_data_.command_buffers_[frame_index];
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0, 1, &descriptor_set, 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout.layout_, 0, 1, &descriptor_set, 0,
+                            nullptr);
 }
 
 void Context::bind_vertex_buffer(const VkBuffer buffer) const {
@@ -496,14 +498,14 @@ void Context::bind_index_buffer(const VkBuffer buffer) const {
     vkCmdBindIndexBuffer(cmd, buffer, 0, VK_INDEX_TYPE_UINT32);
 }
 
-void Context::cmd_push_constants(const VkPipelineLayout pipeline_layout,
+void Context::cmd_push_constants(const PipelineLayout &pipeline_layout,
                                  const void *data,
                                  const uint32_t size,
                                  const VkShaderStageFlags stage_flags,
                                  const uint32_t offset) const {
     const uint32_t frame_index = frame_data_.frame_index_;
     const auto cmd = frame_data_.command_buffers_[frame_index];
-    vkCmdPushConstants(cmd, pipeline_layout, stage_flags, offset, size, data);
+    vkCmdPushConstants(cmd, pipeline_layout.layout_, stage_flags, offset, size, data);
 }
 
 void Context::draw_indexed(const uint32_t index_count) const {
@@ -579,6 +581,7 @@ void Context::recreate_swap_chain() {
 void Context::wait_idle() {
     check(vkDeviceWaitIdle(device_));
 
+    // TODO: Move these somewhere else
     for (auto i = 0; i < frame_data_.max_frames_in_flight_; ++i) {
         vkDestroyFence(device_, frame_data_.fences_[i], nullptr);
         vkDestroySemaphore(device_, frame_data_.image_acquired_semaphores_[i], nullptr);
@@ -601,8 +604,8 @@ void Context::wait_idle() {
     vkDestroySampler(device_, default_sampler_, nullptr);
 }
 
-void Context::destroy_pipeline_layout(const VkPipelineLayout layout) const {
-    vkDestroyPipelineLayout(device_, layout, nullptr);
+void Context::destroy_pipeline_layout(const PipelineLayout &layout) const {
+    vkDestroyPipelineLayout(device_, layout.layout_, nullptr);
 }
 
 void Context::destroy_pipeline(const VkPipeline pipeline) const {

@@ -50,6 +50,18 @@ void Buffer::update(const void *src) const {
     memcpy(buffers_[0].allocation_info_.pMappedData, src, buffers_[0].size_);
 }
 
+void Buffer::update(const void *src, const VkDeviceSize size, const VkDeviceSize offset) const {
+    if (desc_.per_frame) {
+        const uint32_t current_frame_index = desc_.context->get_frame_index();
+        auto *dst = static_cast<char *>(buffers_[current_frame_index].allocation_info_.pMappedData);
+        memcpy(dst + offset, src, size);
+        return;
+    }
+
+    auto *dst = static_cast<char *>(buffers_[0].allocation_info_.pMappedData);
+    memcpy(dst + offset, src, size);
+}
+
 void Buffer::destroy() const {
     for (auto &buffer: buffers_) {
         vmaDestroyBuffer(desc_.context->allocator_, buffer.buffer_, buffer.allocation_);

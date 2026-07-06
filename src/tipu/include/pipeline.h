@@ -5,10 +5,14 @@
 
 #include <vulkan/vulkan.h>
 
-#include "context.h"
-
 class Context;
 
+struct PipelineLayout {
+    VkPipelineLayout layout_{VK_NULL_HANDLE};
+    VkShaderStageFlags shader_stage_flags_{0u};
+    uint32_t size_{0u};
+    uint32_t offset_{0u};
+};
 
 /**
  * A pipeline layout is the interface contract between shaders and the application.
@@ -33,11 +37,13 @@ public:
 
     PipelineLayoutBuilder &add_push_constant(VkShaderStageFlags stage, uint32_t size, uint32_t offset = 0);
 
-    [[nodiscard]] VkPipelineLayout build(const Context *context, const std::string &debug_name = "none");
+    [[nodiscard]] PipelineLayout build(const Context *context, const std::string &debug_name = "none");
 
 private:
     std::vector<VkDescriptorSetLayout> set_layouts_;
     std::vector<VkPushConstantRange> push_constants_;
+
+    PipelineLayout out_layout_{};
 };
 
 class PipelineBuilder {
@@ -72,7 +78,7 @@ public:
     PipelineBuilder &set_color_blend(uint32_t attachment_count, const VkColorComponentFlags mask);
 
     [[nodiscard]] VkPipeline build(const Context *context,
-                                   VkPipelineLayout layout,
+                                   const PipelineLayout &layout,
                                    const std::vector<VkFormat> &color_formats,
                                    VkFormat depth_format,
                                    const std::string &debug_name = "none");

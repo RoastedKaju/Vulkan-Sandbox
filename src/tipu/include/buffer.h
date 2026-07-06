@@ -24,6 +24,8 @@ public:
 
     void update(const void *src) const;
 
+    void update(const void *src, VkDeviceSize size, VkDeviceSize offset) const;
+
     void destroy() const;
 
     // Getter for raw Vulkan buffer

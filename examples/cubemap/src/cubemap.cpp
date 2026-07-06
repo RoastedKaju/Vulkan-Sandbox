@@ -34,7 +34,7 @@ int main(int argc, char *argv[]) {
 
     // load model
     Mesh loaded_mesh{};
-    loaded_mesh.load_mesh(("assets/models/tank.glb"));
+    loaded_mesh.load_mesh(("assets/models/cube.glb"));
 
     // load texture
     std::unique_ptr<Image> camo_tex = ctx->load_texture("assets/textures/camo.jpg");
@@ -80,6 +80,12 @@ int main(int argc, char *argv[]) {
     [[maybe_unused]] const VkShaderModule frag_shader = Shader::create_shader_module(ctx.get(),
         "assets/shaders/model.frag.glsl",
         shaderc_fragment_shader);
+    // [[maybe_unused]] const VkShaderModule sky_vert_shader = Shader::create_shader_module(ctx.get(),
+    //     "assets/shaders/skybox.vert.glsl",
+    //     shaderc_vertex_shader);
+    // [[maybe_unused]] const VkShaderModule sky_frag_shader = Shader::create_shader_module(ctx.get(),
+    //     "assets/shaders/skybox.frag.glsl",
+    //     shaderc_fragment_shader);
 
     // create depth texture
     TextureDesc depth_tex_desc{};
@@ -100,7 +106,7 @@ int main(int argc, char *argv[]) {
     pipeline_layout_desc.add_push_constant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(PushConstant));
     const PipelineLayout pipeline_layout = pipeline_layout_desc.build(ctx.get());
 
-    // create pipeline
+    // create solid pipeline
     PipelineBuilder pipeline_builder{};
     pipeline_builder.add_shader(VK_SHADER_STAGE_VERTEX_BIT, vert_shader);
     pipeline_builder.add_shader(VK_SHADER_STAGE_FRAGMENT_BIT, frag_shader);
@@ -125,6 +131,8 @@ int main(int argc, char *argv[]) {
                                                  pipeline_layout,
                                                  {ctx->get_swap_chain().get_format()},
                                                  depth_texture->format_);
+
+    // create skybox pipeline
 
     // loop setup
     Uint64 last_time = SDL_GetPerformanceCounter();
@@ -151,7 +159,7 @@ int main(int argc, char *argv[]) {
                                                    0.1f, 1000.0f);
         shader_data.projection_[1][1] *= -1.0f; // flip Y
 
-        shader_data.view_ = glm::lookAt(glm::vec3(0.0f, 1.0f, 3.0f),
+        shader_data.view_ = glm::lookAt(glm::vec3(0.0f, 1.0f, 5.0f),
                                         glm::vec3(0.0f, 0.0f, 0.0f),
                                         glm::vec3(0.0f, 1.0f, 0.0f));
 
@@ -220,6 +228,8 @@ int main(int argc, char *argv[]) {
     ctx->destroy_pipeline(pipeline);
     ctx->destory_shader(vert_shader);
     ctx->destory_shader(frag_shader);
+    // ctx->destory_shader(sky_vert_shader);
+    // ctx->destory_shader(sky_frag_shader);
     ctx->destroy_image(depth_texture.get());
     ctx->destroy_image(camo_tex.get());
     // destroy window, instance and device

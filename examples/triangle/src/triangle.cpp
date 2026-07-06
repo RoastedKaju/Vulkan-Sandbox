@@ -35,7 +35,7 @@ int main(int argc, char *argv[]) {
 
     // pipeline layout
     PipelineLayoutBuilder pipeline_layout_desc{};
-    const VkPipelineLayout pipeline_layout = pipeline_layout_desc.build(ctx.get());
+    const PipelineLayout pipeline_layout = pipeline_layout_desc.build(ctx.get());
 
     // pipeline
     PipelineBuilder pipeline_builder{};

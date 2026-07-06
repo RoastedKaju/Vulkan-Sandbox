@@ -99,7 +99,7 @@ int main(int argc, char *argv[]) {
     PipelineLayoutBuilder pipeline_layout_desc{};
     pipeline_layout_desc.add_descriptor_set_layout(ctx->get_texture_registry().get_layout());
     pipeline_layout_desc.add_push_constant(VK_SHADER_STAGE_VERTEX_BIT, sizeof(PushConstant));
-    const VkPipelineLayout pipeline_layout = pipeline_layout_desc.build(ctx.get());
+    const PipelineLayout pipeline_layout = pipeline_layout_desc.build(ctx.get());
 
     // create solid pipeline
     PipelineBuilder solid_pipeline_builder{};

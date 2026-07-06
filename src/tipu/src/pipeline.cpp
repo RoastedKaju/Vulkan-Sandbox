@@ -3,6 +3,7 @@
 #include <volk.h>
 
 #include "utils.h"
+#include "context.h"
 
 PipelineLayoutBuilder &PipelineLayoutBuilder::add_descriptor_set_layout(const VkDescriptorSetLayout layout) {
     set_layouts_.push_back(layout);
@@ -14,10 +15,12 @@ PipelineLayoutBuilder &PipelineLayoutBuilder::add_push_constant(const VkShaderSt
                                                                 const uint32_t offset) {
     const VkPushConstantRange range{stage, offset, size};
     push_constants_.push_back(range);
+    out_layout_.shader_stage_flags_ = stage;
+    out_layout_.offset_ = offset;
     return *this;
 }
 
-VkPipelineLayout PipelineLayoutBuilder::build(const Context *context, const std::string &debug_name) {
+PipelineLayout PipelineLayoutBuilder::build(const Context *context, const std::string &debug_name) {
     const VkPipelineLayoutCreateInfo info{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = static_cast<uint32_t>(set_layouts_.size()),
@@ -29,7 +32,9 @@ VkPipelineLayout PipelineLayoutBuilder::build(const Context *context, const std:
     VkPipelineLayout layout;
     check(vkCreatePipelineLayout(context->device_, &info, nullptr, &layout));
     std::printf("Created pipeline layout: %s.\n", debug_name.c_str());
-    return layout;
+
+    out_layout_.layout_ = layout;
+    return out_layout_;
 }
 
 PipelineBuilder::PipelineBuilder() {
@@ -191,7 +196,7 @@ PipelineBuilder &PipelineBuilder::set_color_blend(const uint32_t attachment_coun
 }
 
 VkPipeline PipelineBuilder::build(const Context *context,
-                                  const VkPipelineLayout layout,
+                                  const PipelineLayout &layout,
                                   const std::vector<VkFormat> &color_formats,
                                   const VkFormat depth_format,
                                   const std::string &debug_name) {
@@ -222,7 +227,7 @@ VkPipeline PipelineBuilder::build(const Context *context,
         .pDepthStencilState = &depth_stencil_state_,
         .pColorBlendState = &color_blend_state_,
         .pDynamicState = &dynamic_state_info,
-        .layout = layout
+        .layout = layout.layout_
     };
 
     VkPipeline pipeline;

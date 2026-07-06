@@ -16,6 +16,7 @@
 #include "swap_chain.h"
 #include "attachment.h"
 #include "descriptor.h"
+#include "pipeline.h"
 
 struct Config {
     std::string app_name_ = "default";
@@ -30,6 +31,7 @@ struct TextureDesc {
     uint32_t array_layers_{1};
     VkSampleCountFlagBits samples_{VK_SAMPLE_COUNT_1_BIT};
     VkImageTiling tiling_{VK_IMAGE_TILING_OPTIMAL};
+    VkImageType type_{VK_IMAGE_TYPE_2D};
     VkImageUsageFlags usage_{0};
     VkImageAspectFlags aspect_{VK_IMAGE_ASPECT_COLOR_BIT};
     VkFormat format_ = VK_FORMAT_UNDEFINED;
@@ -66,13 +68,13 @@ public:
 
     void bind_pipeline(VkPipeline pipeline) const;
 
-    void bind_descriptor_set(VkPipelineLayout pipeline_layout, VkDescriptorSet descriptor_set) const;
+    void bind_descriptor_set(const PipelineLayout &pipeline_layout, VkDescriptorSet descriptor_set) const;
 
     void bind_vertex_buffer(VkBuffer buffer) const;
 
     void bind_index_buffer(VkBuffer buffer) const;
 
-    void cmd_push_constants(VkPipelineLayout pipeline_layout,
+    void cmd_push_constants(const PipelineLayout &pipeline_layout,
                             const void *data,
                             uint32_t size,
                             VkShaderStageFlags stage_flags = VK_SHADER_STAGE_ALL,
@@ -93,7 +95,7 @@ public:
 
     void wait_idle();
 
-    void destroy_pipeline_layout(VkPipelineLayout layout) const;
+    void destroy_pipeline_layout(const PipelineLayout &layout) const;
 
     void destroy_pipeline(VkPipeline pipeline) const;
 
@@ -118,9 +120,17 @@ public:
     DescriptorRegistry &get_texture_registry() { return descriptor_registry_; }
     SDL_Window *get_window() const { return window_; }
     glm::ivec2 get_window_size() const { return window_size_; }
+    VmaAllocator get_allocator() const { return allocator_; }
+    VkCommandPool get_command_pool() const { return command_pool_; }
+    VkQueue get_queue() const { return queue_; }
 
-private
-:
+    static void transition_image(VkCommandBuffer cmd,
+                                 Image &image,
+                                 VkImageLayout new_layout,
+                                 VkAccessFlags2 new_access,
+                                 VkPipelineStageFlags2 new_stage);
+
+private:
     bool create_instance(const char *app_name = "default");
 
     bool setup_device(uint32_t device_index = 0);
@@ -128,12 +138,6 @@ private
     void create_swap_chain();
 
     void create_frame_resources();
-
-    static void transition_image(VkCommandBuffer cmd,
-                                 Image &image,
-                                 VkImageLayout new_layout,
-                                 VkAccessFlags2 new_access,
-                                 VkPipelineStageFlags2 new_stage);
 
     void create_default_sampler();
 

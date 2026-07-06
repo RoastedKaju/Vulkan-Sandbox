@@ -24,6 +24,7 @@ struct Image {
 
     VkFormat format_{VK_FORMAT_UNDEFINED};
     VkImageAspectFlags aspect_{VK_IMAGE_ASPECT_COLOR_BIT};
+    VkImageType type_{VK_IMAGE_TYPE_2D};
     VkImageUsageFlags usage_{0};
 
     uint32_t width_{0};

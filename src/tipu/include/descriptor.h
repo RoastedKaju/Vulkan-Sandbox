@@ -7,6 +7,7 @@
 class DescriptorRegistry {
 public:
     static constexpr uint32_t kMaxTextureCount = 1024;
+    static constexpr uint32_t kMaxCubemapCount = 256;
 
     DescriptorRegistry() = default;
 
@@ -18,13 +19,19 @@ public:
 
     void free_texture(uint32_t index);
 
+    uint32_t register_cubemap(VkImageView view, VkSampler sampler);
+
+    void free_cubemap(uint32_t index);
+
     VkDescriptorPool get_pool() const { return pool_; }
     VkDescriptorSetLayout get_layout() const { return layout_; }
     VkDescriptorSet get_set() const { return set_; };
 
 private:
     void create_pool();
+
     void create_layout();
+
     void allocate_descriptor_set();
 
     VkDevice device_{VK_NULL_HANDLE};
@@ -35,4 +42,7 @@ private:
     // index tracking
     std::queue<uint32_t> free_indices_;
     uint32_t next_index_{0};
+
+    std::queue<uint32_t> free_cubemap_indices_;
+    uint32_t next_cubemap_index_{0};
 };

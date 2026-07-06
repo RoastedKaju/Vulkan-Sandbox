@@ -15,7 +15,7 @@ struct ShaderData {
     glm::mat4 projection_;
     glm::mat4 view_;
     glm::mat4 model_;
-    uint32_t tex_index_;
+    uint32_t index_;
 };
 
 struct PushConstant {
@@ -72,6 +72,14 @@ int main(int argc, char *argv[]) {
     };
     Buffer uniform_buffer{};
     uniform_buffer.create(u_buf_desc);
+    BufferDesc proc_u_buf_desc{
+        .context = ctx.get(),
+        .usage_flags = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        .size = sizeof(ShaderData),
+        .per_frame = true
+    };
+    Buffer proc_uniform_buffer{};
+    proc_uniform_buffer.create(proc_u_buf_desc);
 
     // load shaders
     [[maybe_unused]] const VkShaderModule vert_shader = Shader::create_shader_module(ctx.get(),
@@ -80,12 +88,12 @@ int main(int argc, char *argv[]) {
     [[maybe_unused]] const VkShaderModule frag_shader = Shader::create_shader_module(ctx.get(),
         "assets/shaders/model.frag.glsl",
         shaderc_fragment_shader);
-    // [[maybe_unused]] const VkShaderModule sky_vert_shader = Shader::create_shader_module(ctx.get(),
-    //     "assets/shaders/skybox.vert.glsl",
-    //     shaderc_vertex_shader);
-    // [[maybe_unused]] const VkShaderModule sky_frag_shader = Shader::create_shader_module(ctx.get(),
-    //     "assets/shaders/skybox.frag.glsl",
-    //     shaderc_fragment_shader);
+    [[maybe_unused]] const VkShaderModule proc_vert_shader = Shader::create_shader_module(ctx.get(),
+        "assets/shaders/skybox.vert.glsl",
+        shaderc_vertex_shader);
+    [[maybe_unused]] const VkShaderModule proc_frag_shader = Shader::create_shader_module(ctx.get(),
+        "assets/shaders/skybox.frag.glsl",
+        shaderc_fragment_shader);
 
     // create depth texture
     TextureDesc depth_tex_desc{};
@@ -132,7 +140,21 @@ int main(int argc, char *argv[]) {
                                                  {ctx->get_swap_chain().get_format()},
                                                  depth_texture->format_);
 
-    // create skybox pipeline
+    // create procedural pipeline
+    PipelineBuilder proc_pipeline_builder{};
+    proc_pipeline_builder.add_shader(VK_SHADER_STAGE_VERTEX_BIT, proc_vert_shader);
+    proc_pipeline_builder.add_shader(VK_SHADER_STAGE_FRAGMENT_BIT, proc_frag_shader);
+    proc_pipeline_builder.set_vertex_layout({}, {});
+    proc_pipeline_builder.set_input_assembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    proc_pipeline_builder.set_viewport(1, 1, true);
+    proc_pipeline_builder.set_rasterization(VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    proc_pipeline_builder.set_multisampling(VK_SAMPLE_COUNT_1_BIT);
+    proc_pipeline_builder.set_depth_stencil(true, true, VK_COMPARE_OP_LESS_OR_EQUAL);
+    proc_pipeline_builder.set_color_blend(1, 0xF);
+    VkPipeline proc_pipeline = proc_pipeline_builder.build(ctx.get(),
+                                                           pipeline_layout,
+                                                           {ctx->get_swap_chain().get_format()},
+                                                           depth_texture->format_);
 
     // loop setup
     Uint64 last_time = SDL_GetPerformanceCounter();
@@ -159,7 +181,7 @@ int main(int argc, char *argv[]) {
                                                    0.1f, 1000.0f);
         shader_data.projection_[1][1] *= -1.0f; // flip Y
 
-        shader_data.view_ = glm::lookAt(glm::vec3(0.0f, 1.0f, 5.0f),
+        shader_data.view_ = glm::lookAt(glm::vec3(0.0f, 1.0f, 10.0f),
                                         glm::vec3(0.0f, 0.0f, 0.0f),
                                         glm::vec3(0.0f, 1.0f, 0.0f));
 
@@ -167,15 +189,26 @@ int main(int argc, char *argv[]) {
 
         ctx->acquire_command_buffer();
         {
+            // camo draw
             auto transform = glm::mat4(1.0f);
-
             transform = glm::translate(transform, glm::vec3(0.0f, 0.0f, 0.0f));
             transform = glm::rotate(transform, glm::radians(45.0f * time), glm::vec3(0.0f, 1.0f, 0.0f));
             transform = glm::scale(transform, glm::vec3(1.0f, 1.0f, 1.0f));
             shader_data.model_ = transform;
-            shader_data.tex_index_ = camo_tex->bindless_index_;
+            shader_data.index_ = camo_tex->bindless_index_;
+            uniform_buffer.update(&shader_data);
 
-            uniform_buffer.update(&shader_data); // upload data to buffer on GPU
+            // proc draw
+            ShaderData proc_shader_data{};
+            proc_shader_data.projection_ = shader_data.projection_;
+            proc_shader_data.view_ = shader_data.view_;
+            transform = glm::mat4(1.0f);
+            transform = glm::translate(transform, glm::vec3(0.0f, 2.5f, 0.0f));
+            transform = glm::rotate(transform, glm::radians(45.0f * time), glm::vec3(0.0f, 1.0f, 0.0f));
+            transform = glm::scale(transform, glm::vec3(1.0f, 1.0f, 1.0f));
+            proc_shader_data.model_ = transform;
+            proc_shader_data.index_ = camo_tex->bindless_index_;
+            proc_uniform_buffer.update(&proc_shader_data);
 
             // attachments
             Attachment scene_pass{};
@@ -197,12 +230,19 @@ int main(int argc, char *argv[]) {
 
             ctx->begin_rendering(scene_pass, frame_buffer);
             {
-                ctx->bind_pipeline(pipeline);
+                // draw procedural box
+                ctx->bind_pipeline(proc_pipeline);
                 ctx->bind_descriptor_set(pipeline_layout, ctx->get_texture_registry().get_set());
+                PushConstant proc_pc{.data_address = proc_uniform_buffer.address()};
+                ctx->cmd_push_constants(pipeline_layout, &proc_pc);
+                ctx->draw(36);
+
+                // model
+                ctx->bind_pipeline(pipeline);
                 ctx->bind_vertex_buffer(vertex_buffer.get());
                 ctx->bind_index_buffer(index_buffer.get());
                 PushConstant pc{.data_address = uniform_buffer.address()};
-                ctx->cmd_push_constants(pipeline_layout, &pc, sizeof(pc), VK_SHADER_STAGE_VERTEX_BIT);
+                ctx->cmd_push_constants(pipeline_layout, &pc);
                 ctx->draw_indexed(loaded_mesh.data().indices_.size());
             }
             ctx->end_rendering();
@@ -224,12 +264,14 @@ int main(int argc, char *argv[]) {
     vertex_buffer.destroy();
     index_buffer.destroy();
     uniform_buffer.destroy();
+    proc_uniform_buffer.destroy();
     ctx->destroy_pipeline_layout(pipeline_layout);
     ctx->destroy_pipeline(pipeline);
+    ctx->destroy_pipeline(proc_pipeline);
     ctx->destory_shader(vert_shader);
     ctx->destory_shader(frag_shader);
-    // ctx->destory_shader(sky_vert_shader);
-    // ctx->destory_shader(sky_frag_shader);
+    ctx->destory_shader(proc_vert_shader);
+    ctx->destory_shader(proc_frag_shader);
     ctx->destroy_image(depth_texture.get());
     ctx->destroy_image(camo_tex.get());
     // destroy window, instance and device

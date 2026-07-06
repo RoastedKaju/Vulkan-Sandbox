@@ -16,6 +16,7 @@ PipelineLayoutBuilder &PipelineLayoutBuilder::add_push_constant(const VkShaderSt
     const VkPushConstantRange range{stage, offset, size};
     push_constants_.push_back(range);
     out_layout_.shader_stage_flags_ = stage;
+    out_layout_.size_ = size;
     out_layout_.offset_ = offset;
     return *this;
 }

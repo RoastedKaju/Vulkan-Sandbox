@@ -60,6 +60,8 @@ public:
 
     std::unique_ptr<Image> load_texture(const std::filesystem::path &path);
 
+    std::unique_ptr<Image> load_cubemap(const std::array<std::filesystem::path, 6> &paths);
+
     VkFormat get_device_depth_format() const;
 
     void acquire_command_buffer();
@@ -74,11 +76,7 @@ public:
 
     void bind_index_buffer(VkBuffer buffer) const;
 
-    void cmd_push_constants(const PipelineLayout &pipeline_layout,
-                            const void *data,
-                            uint32_t size,
-                            VkShaderStageFlags stage_flags = VK_SHADER_STAGE_ALL,
-                            uint32_t offset = 0) const;
+    void cmd_push_constants(const PipelineLayout &pipeline_layout, const void *data) const;
 
     void draw_indexed(uint32_t index_count) const;
 
@@ -123,12 +121,7 @@ public:
     VmaAllocator get_allocator() const { return allocator_; }
     VkCommandPool get_command_pool() const { return command_pool_; }
     VkQueue get_queue() const { return queue_; }
-
-    static void transition_image(VkCommandBuffer cmd,
-                                 Image &image,
-                                 VkImageLayout new_layout,
-                                 VkAccessFlags2 new_access,
-                                 VkPipelineStageFlags2 new_stage);
+    VkSampler get_default_sampler() const { return default_sampler_; }
 
 private:
     bool create_instance(const char *app_name = "default");
@@ -140,6 +133,12 @@ private:
     void create_frame_resources();
 
     void create_default_sampler();
+
+    static void transition_image(VkCommandBuffer cmd,
+                                 Image &image,
+                                 VkImageLayout new_layout,
+                                 VkAccessFlags2 new_access,
+                                 VkPipelineStageFlags2 new_stage);
 
     Config config_;
 

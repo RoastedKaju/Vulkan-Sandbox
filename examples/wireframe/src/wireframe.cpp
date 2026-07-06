@@ -205,19 +205,19 @@ int main(int argc, char *argv[]) {
 
             ctx->begin_rendering(scene_pass, frame_buffer);
             {
+                // draw solid
                 ctx->bind_pipeline(solid_pipeline);
                 ctx->bind_descriptor_set(pipeline_layout, ctx->get_texture_registry().get_set());
                 ctx->bind_vertex_buffer(vertex_buffer.get());
                 ctx->bind_index_buffer(index_buffer.get());
                 PushConstant pc{uniform_buffer.address(), 0};
-                ctx->cmd_push_constants(pipeline_layout, &pc, sizeof(pc), VK_SHADER_STAGE_VERTEX_BIT);
+                ctx->cmd_push_constants(pipeline_layout, &pc);
                 ctx->draw_indexed(loaded_mesh.data().indices_.size());
 
                 // draw wireframe
-                uniform_buffer.update(&shader_data);
                 ctx->bind_pipeline(wire_pipeline);
                 pc.wireframe = 1;
-                ctx->cmd_push_constants(pipeline_layout, &pc, sizeof(pc), VK_SHADER_STAGE_VERTEX_BIT);
+                ctx->cmd_push_constants(pipeline_layout, &pc);
                 ctx->draw_indexed(loaded_mesh.data().indices_.size());
             }
             ctx->end_rendering();

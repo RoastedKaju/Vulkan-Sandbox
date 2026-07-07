@@ -360,9 +360,8 @@ std::unique_ptr<Image> Context::load_texture(const std::filesystem::path &path) 
 }
 
 std::unique_ptr<Image> Context::load_cubemap(const std::array<std::filesystem::path, 6> &paths) {
-    // Expected face order: +X, -X, +Y, -Y, +Z, -Z (Vulkan cube array layer order)
-
-    int width = 0, height = 0, channels = 0;
+    int width = 0;
+    int height = 0;
     std::array<unsigned char *, 6> face_pixels{};
 
     for (size_t i = 0; i < 6; ++i) {
@@ -387,7 +386,7 @@ std::unique_ptr<Image> Context::load_cubemap(const std::array<std::filesystem::p
         face_pixels[i] = pixels;
     }
 
-    // --- Create the cube-compatible image (6 array layers, one VkImage) ---
+    // create cubemap
     auto image = std::make_unique<Image>();
     image->format_ = VK_FORMAT_R8G8B8A8_UNORM;
     image->aspect_ = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -437,7 +436,7 @@ std::unique_ptr<Image> Context::load_cubemap(const std::array<std::filesystem::p
 
     check(vkCreateImageView(device_, &view_create_info, nullptr, &image->view_));
 
-    // --- Upload all 6 faces via one staging buffer ---
+    // upload all 6 faces
     const VkDeviceSize face_size = static_cast<VkDeviceSize>(width) * height * 4;
     const VkDeviceSize total_size = face_size * 6;
 

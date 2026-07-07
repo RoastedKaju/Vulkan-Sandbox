@@ -38,6 +38,15 @@ int main(int argc, char *argv[]) {
 
     // load texture
     std::unique_ptr<Image> camo_tex = ctx->load_texture("assets/textures/camo.jpg");
+    std::unique_ptr<Image> sky_tex = ctx->load_cubemap(
+        {
+            "assets/textures/skybox/right.jpg",
+            "assets/textures/skybox/left.jpg",
+            "assets/textures/skybox/top.jpg",
+            "assets/textures/skybox/bottom.jpg",
+            "assets/textures/skybox/front.jpg",
+            "assets/textures/skybox/back.jpg",
+        });
 
     // buffers for model
     const VkDeviceSize v_buf_size = sizeof(Vertex) * loaded_mesh.data().vertices_.size();
@@ -140,16 +149,16 @@ int main(int argc, char *argv[]) {
                                                  {ctx->get_swap_chain().get_format()},
                                                  depth_texture->format_);
 
-    // create procedural pipeline
+    // create skybox pipeline
     PipelineBuilder proc_pipeline_builder{};
     proc_pipeline_builder.add_shader(VK_SHADER_STAGE_VERTEX_BIT, proc_vert_shader);
     proc_pipeline_builder.add_shader(VK_SHADER_STAGE_FRAGMENT_BIT, proc_frag_shader);
     proc_pipeline_builder.set_vertex_layout({}, {});
     proc_pipeline_builder.set_input_assembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
     proc_pipeline_builder.set_viewport(1, 1, true);
-    proc_pipeline_builder.set_rasterization(VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    proc_pipeline_builder.set_rasterization(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
     proc_pipeline_builder.set_multisampling(VK_SAMPLE_COUNT_1_BIT);
-    proc_pipeline_builder.set_depth_stencil(true, true, VK_COMPARE_OP_LESS_OR_EQUAL);
+    proc_pipeline_builder.set_depth_stencil(true, false, VK_COMPARE_OP_LESS_OR_EQUAL);
     proc_pipeline_builder.set_color_blend(1, 0xF);
     VkPipeline proc_pipeline = proc_pipeline_builder.build(ctx.get(),
                                                            pipeline_layout,
@@ -179,6 +188,7 @@ int main(int argc, char *argv[]) {
         shader_data.projection_ = glm::perspective(glm::radians(45.0f),
                                                    1280.0f / 720.0f,
                                                    0.1f, 1000.0f);
+
         shader_data.projection_[1][1] *= -1.0f; // flip Y
 
         shader_data.view_ = glm::lookAt(glm::vec3(0.0f, 1.0f, 10.0f),
@@ -202,12 +212,7 @@ int main(int argc, char *argv[]) {
             ShaderData proc_shader_data{};
             proc_shader_data.projection_ = shader_data.projection_;
             proc_shader_data.view_ = shader_data.view_;
-            transform = glm::mat4(1.0f);
-            transform = glm::translate(transform, glm::vec3(0.0f, 2.5f, 0.0f));
-            transform = glm::rotate(transform, glm::radians(45.0f * time), glm::vec3(0.0f, 1.0f, 0.0f));
-            transform = glm::scale(transform, glm::vec3(1.0f, 1.0f, 1.0f));
-            proc_shader_data.model_ = transform;
-            proc_shader_data.index_ = camo_tex->bindless_index_;
+            proc_shader_data.index_ = sky_tex->bindless_index_;
             proc_uniform_buffer.update(&proc_shader_data);
 
             // attachments
@@ -274,6 +279,7 @@ int main(int argc, char *argv[]) {
     ctx->destory_shader(proc_frag_shader);
     ctx->destroy_image(depth_texture.get());
     ctx->destroy_image(camo_tex.get());
+    ctx->destroy_image(sky_tex.get());
     // destroy window, instance and device
     ctx->destroy();
 

@@ -15,11 +15,62 @@ struct ShaderData {
     glm::mat4 projection_;
     glm::mat4 view_;
     glm::mat4 model_;
-    uint32_t index_;
+    glm::vec3 camera_;
+    uint32_t bindless_texture_index_;
+    uint32_t bindless_cube_index_;
 };
 
 struct PushConstant {
     VkDeviceAddress data_address;
+};
+
+struct Camera {
+    glm::vec3 position = glm::vec3(0.0f, 0.0f, 10.0f);
+    glm::vec3 front = glm::vec3(0.0f, 0.0f, -1.0f);
+    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 worldUp = glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 right = glm::vec3(1.0f, 0.0f, 0.0f);
+
+    float yaw = -90.0f; // facing -Z initially
+    float pitch = 0.0f;
+
+    float moveSpeed = 5.0f; // units per second
+    float mouseSens = 0.1f; // degrees per pixel
+
+    void update() {
+        glm::vec3 newFront;
+        newFront.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+        newFront.y = sin(glm::radians(pitch));
+        newFront.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+        front = glm::normalize(newFront);
+        right = glm::normalize(glm::cross(front, worldUp));
+        up = glm::normalize(glm::cross(right, front));
+    }
+
+    void process_keyboard(const bool *keys, float dt) {
+        float velocity = moveSpeed * dt;
+
+        if (keys[SDL_SCANCODE_W]) position += front * velocity;
+        if (keys[SDL_SCANCODE_S]) position -= front * velocity;
+        if (keys[SDL_SCANCODE_A]) position -= right * velocity;
+        if (keys[SDL_SCANCODE_D]) position += right * velocity;
+        if (keys[SDL_SCANCODE_SPACE]) position += worldUp * velocity;
+        if (keys[SDL_SCANCODE_LCTRL]) position -= worldUp * velocity;
+    }
+
+    void process_mouse(float xrel, float yrel) {
+        yaw += xrel * mouseSens;
+        pitch -= yrel * mouseSens; // inverted so mouse-up looks up
+
+        if (pitch > 89.0f) pitch = 89.0f;
+        if (pitch < -89.0f) pitch = -89.0f;
+
+        update();
+    }
+
+    glm::mat4 getViewMatrix() const {
+        return glm::lookAt(position, position + front, up);
+    }
 };
 
 int main(int argc, char *argv[]) {
@@ -31,6 +82,7 @@ int main(int argc, char *argv[]) {
     const auto ctx = std::make_unique<Context>(config);
     ctx->initialize();
     [[maybe_unused]] SDL_Window *window = ctx->create_window("Model Viewer", kWidth, kHeight);
+    SDL_SetWindowRelativeMouseMode(window, true);
 
     // load model
     Mesh loaded_mesh{};
@@ -92,10 +144,10 @@ int main(int argc, char *argv[]) {
 
     // load shaders
     [[maybe_unused]] const VkShaderModule vert_shader = Shader::create_shader_module(ctx.get(),
-        "assets/shaders/model.vert.glsl",
+        "assets/shaders/environment.vert.glsl",
         shaderc_vertex_shader);
     [[maybe_unused]] const VkShaderModule frag_shader = Shader::create_shader_module(ctx.get(),
-        "assets/shaders/model.frag.glsl",
+        "assets/shaders/environment.frag.glsl",
         shaderc_fragment_shader);
     [[maybe_unused]] const VkShaderModule proc_vert_shader = Shader::create_shader_module(ctx.get(),
         "assets/shaders/skybox.vert.glsl",
@@ -169,6 +221,11 @@ int main(int argc, char *argv[]) {
     Uint64 last_time = SDL_GetPerformanceCounter();
     bool quit = false;
 
+    // camera
+    Camera camera{};
+    camera.position = glm::vec3(0.0f, 0.0f, 10.0f);
+    camera.update();
+
     // super loop
     while (!quit) {
         Uint64 current_time = SDL_GetPerformanceCounter();
@@ -181,7 +238,16 @@ int main(int argc, char *argv[]) {
             if (event.type == SDL_EVENT_QUIT) {
                 quit = true;
             }
+            if (event.type == SDL_EVENT_MOUSE_MOTION) {
+                camera.process_mouse(event.motion.xrel, event.motion.yrel);
+            }
+            if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE) {
+                quit = true;
+            }
         }
+
+        const bool *keys = SDL_GetKeyboardState(nullptr);
+        camera.process_keyboard(keys, delta_time);
 
         // update shader data
         ShaderData shader_data{};
@@ -191,28 +257,28 @@ int main(int argc, char *argv[]) {
 
         shader_data.projection_[1][1] *= -1.0f; // flip Y
 
-        shader_data.view_ = glm::lookAt(glm::vec3(0.0f, 1.0f, 10.0f),
-                                        glm::vec3(0.0f, 0.0f, 0.0f),
-                                        glm::vec3(0.0f, 1.0f, 0.0f));
+        shader_data.view_ = camera.getViewMatrix();
+        shader_data.camera_ = camera.position;
 
-        auto time = SDL_GetTicks() / 1000.0f;
+        [[maybe_unused]] auto time = SDL_GetTicks() / 1000.0f;
 
         ctx->acquire_command_buffer();
         {
             // camo draw
             auto transform = glm::mat4(1.0f);
             transform = glm::translate(transform, glm::vec3(0.0f, 0.0f, 0.0f));
-            transform = glm::rotate(transform, glm::radians(45.0f * time), glm::vec3(0.0f, 1.0f, 0.0f));
+            transform = glm::rotate(transform, glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             transform = glm::scale(transform, glm::vec3(1.0f, 1.0f, 1.0f));
             shader_data.model_ = transform;
-            shader_data.index_ = camo_tex->bindless_index_;
+            // shader_data.bindless_texture_index_ = camo_tex->bindless_index_;
+            shader_data.bindless_cube_index_ = sky_tex->bindless_index_;
             uniform_buffer.update(&shader_data);
 
             // proc draw
             ShaderData proc_shader_data{};
             proc_shader_data.projection_ = shader_data.projection_;
             proc_shader_data.view_ = shader_data.view_;
-            proc_shader_data.index_ = sky_tex->bindless_index_;
+            proc_shader_data.bindless_cube_index_ = sky_tex->bindless_index_;
             proc_uniform_buffer.update(&proc_shader_data);
 
             // attachments

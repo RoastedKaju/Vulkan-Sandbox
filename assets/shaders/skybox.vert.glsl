@@ -11,7 +11,9 @@ struct ShaderData {
     mat4 projection;
     mat4 view;
     mat4 model;
-    uint textureIndex;
+    vec3 camera;
+    uint tex_index;
+    uint cubemap_index;
 };
 
 layout (buffer_reference, scalar) readonly buffer ShaderDataRef {
@@ -49,5 +51,5 @@ void main()
     int idx = indices[gl_VertexIndex];
     gl_Position = sceneData.projection * mat4(mat3(sceneData.view)) * vec4(1.0 * pos[idx], 1.0);
     outDirection = pos[idx].xyz;
-    outTexIndex = sceneData.textureIndex;
+    outTexIndex = sceneData.cubemap_index;
 }

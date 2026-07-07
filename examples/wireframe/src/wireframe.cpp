@@ -35,10 +35,10 @@ int main(int argc, char *argv[]) {
 
     // load model
     Mesh loaded_mesh{};
-    loaded_mesh.load_mesh(("assets/models/tank.glb"));
+    loaded_mesh.load_mesh(("assets/models/gun.glb"));
 
     // load texture
-    std::unique_ptr<Image> camo_tex = ctx->load_texture("assets/textures/camo.jpg");
+    std::unique_ptr<Image> camo_tex = ctx->load_texture("assets/textures/gun.jpg");
 
     // buffers for model
     const VkDeviceSize v_buf_size = sizeof(Vertex) * loaded_mesh.data().vertices_.size();
@@ -167,7 +167,7 @@ int main(int argc, char *argv[]) {
                                                    0.1f, 1000.0f);
         shader_data.projection_[1][1] *= -1.0f; // flip Y
 
-        shader_data.view_ = glm::lookAt(glm::vec3(0.0f, 1.0f, 3.0f),
+        shader_data.view_ = glm::lookAt(glm::vec3(0.0f, 1.0f, 15.0f),
                                         glm::vec3(0.0f, 0.0f, 0.0f),
                                         glm::vec3(0.0f, 1.0f, 0.0f));
 
@@ -179,11 +179,11 @@ int main(int argc, char *argv[]) {
 
             transform = glm::translate(transform, glm::vec3(0.0f, 0.0f, 0.0f));
             transform = glm::rotate(transform, glm::radians(45.0f * time), glm::vec3(0.0f, 1.0f, 0.0f));
-            transform = glm::scale(transform, glm::vec3(1.0f, 1.0f, 1.0f));
+            transform = glm::scale(transform, glm::vec3(0.03f, 0.03f, 0.03f));
             shader_data.model_ = transform;
             shader_data.tex_index_ = camo_tex->bindless_index_;
 
-            uniform_buffer.update(&shader_data); // upload data to buffer on GPU
+            uniform_buffer.update(&shader_data);
 
             // attachments
             Attachment scene_pass{};

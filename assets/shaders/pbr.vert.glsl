@@ -1,9 +1,9 @@
 #version 460
-#extension GL_EXT_buffer_reference : require
-#extension GL_EXT_scalar_block_layout : require
-#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_buffer_reference: require
+#extension GL_EXT_scalar_block_layout: require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64: require
 
-layout(push_constant) uniform PushConstants {
+layout (push_constant) uniform PushConstants {
     uint64_t address;
 };
 
@@ -12,27 +12,59 @@ struct ShaderData {
     mat4 view;
     mat4 model;
     vec3 camera;
-    uint tex_index;
+    uint albedo_index;
+    uint metallic_index;
+    uint normal_index;
     uint cubemap_index;
 };
 
-layout(buffer_reference, scalar) readonly buffer ShaderDataRef {
+layout (buffer_reference, scalar) readonly buffer ShaderDataRef {
     ShaderData data;
 };
 
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
-layout(location = 2) in vec2 inUV;
+layout (location = 0) in vec3 inPosition;
+layout (location = 1) in vec3 inNormal;
+layout (location = 2) in vec2 inUV;
+layout (location = 3) in vec4 inTangent;
 
-layout(location = 0) out vec3 outNormal;
-layout(location = 1) out vec2 outUV;
-layout(location = 2) out flat uint outTexIndex;
+layout (location = 0) out vec3 outWorldPos;
+layout (location = 1) out vec3 outWorldNormal;
+layout (location = 2) out vec2 outUV;
+layout (location = 3) out flat uint outAlbedoIndex;
+layout (location = 4) out flat uint outMetallicIndex;
+layout (location = 5) out flat uint outNormalIndex;
+layout (location = 6) out flat uint outCubeIndex;
+layout (location = 7) out vec3 outTangent;
+layout (location = 8) out vec3 outBitangent;
+layout (location = 9) out vec3 outNormal;
 
 void main() {
-    ShaderData sd = ShaderDataRef(address).data;
+    ShaderData sceneData = ShaderDataRef(address).data;
 
-    gl_Position = sd.projection * sd.view * sd.model * vec4(inPosition, 1.0);
-    outNormal = mat3(sd.view * sd.model) * inNormal;
+    // World-space position
+    vec4 worldPos = sceneData.model * vec4(inPosition, 1.0);
+
+    // Normal calculation
+    mat3 normalMatrix = transpose(inverse(mat3(sceneData.model)));
+
+    vec3 N = normalize(normalMatrix * inNormal);
+    vec3 T = normalize(normalMatrix * inTangent.xyz);
+    vec3 B = normalize(cross(N, T) * inTangent.w);
+
+    outTangent = T;
+    outBitangent = B;
+    outNormal = N;
+
+    // Outputs
+    outWorldPos = worldPos.xyz;
+    outWorldNormal = normalize(normalMatrix * inNormal);
     outUV = inUV;
-    outTexIndex = sd.tex_index;
+
+    outAlbedoIndex = sceneData.albedo_index;
+    outMetallicIndex = sceneData.metallic_index;
+    outNormalIndex = sceneData.normal_index;
+    outCubeIndex = sceneData.cubemap_index;
+
+    // Final clip-space position
+    gl_Position = sceneData.projection * sceneData.view * worldPos;
 }

@@ -58,7 +58,7 @@ public:
 
     std::unique_ptr<Image> create_texture(const TextureDesc &desc) const;
 
-    std::unique_ptr<Image> load_texture(const std::filesystem::path &path);
+    std::unique_ptr<Image> load_texture(const std::filesystem::path &path, VkFormat format = VK_FORMAT_R8G8B8A8_UNORM);
 
     std::unique_ptr<Image> load_cubemap(const std::array<std::filesystem::path, 6> &paths);
 

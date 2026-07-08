@@ -249,7 +249,7 @@ std::unique_ptr<Image> Context::create_texture(const TextureDesc &desc) const {
     return image;
 }
 
-std::unique_ptr<Image> Context::load_texture(const std::filesystem::path &path) {
+std::unique_ptr<Image> Context::load_texture(const std::filesystem::path &path, VkFormat format) {
     if (!std::filesystem::exists(path)) {
         throw std::runtime_error("Texture does not exist: " + path.string());
     }
@@ -274,7 +274,7 @@ std::unique_ptr<Image> Context::load_texture(const std::filesystem::path &path) 
         .tiling_ = VK_IMAGE_TILING_OPTIMAL,
         .usage_ = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         .aspect_ = VK_IMAGE_ASPECT_COLOR_BIT,
-        .format_ = VK_FORMAT_R8G8B8A8_UNORM,
+        .format_ = format,
         .prefer_dedicated_alloc_ = false
     };
 

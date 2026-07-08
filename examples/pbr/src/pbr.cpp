@@ -16,7 +16,9 @@ struct ShaderData {
     glm::mat4 view_;
     glm::mat4 model_;
     glm::vec3 camera_;
-    uint32_t bindless_texture_index_;
+    uint32_t bindless_albedo_index_;
+    uint32_t bindless_metallic_index_;
+    uint32_t bindless_normal_index_;
     uint32_t bindless_cube_index_;
 };
 
@@ -88,8 +90,13 @@ int main(int argc, char *argv[]) {
     Mesh loaded_mesh{};
     loaded_mesh.load_mesh(("assets/models/rifle.glb"));
 
-    // load texture
-    std::unique_ptr<Image> albedo_tex = ctx->load_texture("assets/textures/rifle/color.png");
+    // load textures
+    std::unique_ptr<Image> albedo_tex = ctx->load_texture("assets/textures/rifle/color.png",
+                                                          VK_FORMAT_R8G8B8A8_SRGB);
+    std::unique_ptr<Image> metallic_tex = ctx->load_texture("assets/textures/rifle/metallic.png",
+                                                            VK_FORMAT_R8G8B8A8_UNORM);
+    std::unique_ptr<Image> normal_tex = ctx->load_texture("assets/textures/rifle/normal.png",
+                                                          VK_FORMAT_R8G8B8A8_UNORM);
     std::unique_ptr<Image> sky_tex = ctx->load_cubemap(
         {
             "assets/textures/skybox/right.jpg",
@@ -188,6 +195,7 @@ int main(int argc, char *argv[]) {
         {.location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT},
         {.location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex, normal_)},
         {.location = 2, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(Vertex, uv_)},
+        {.location = 3, .binding = 0, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = offsetof(Vertex, tangent_)},
     };
     pipeline_builder.set_vertex_layout(vertex_binding, vertex_attributes);
     pipeline_builder.set_input_assembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
@@ -264,14 +272,16 @@ int main(int argc, char *argv[]) {
 
         ctx->acquire_command_buffer();
         {
-            // camo draw
+            // gun draw
             auto transform = glm::mat4(1.0f);
             transform = glm::translate(transform, glm::vec3(0.0f, 0.0f, 0.0f));
-            transform = glm::rotate(transform, glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            transform = glm::rotate(transform, glm::radians(45.0f * time), glm::vec3(0.0f, 1.0f, 0.0f));
             transform = glm::rotate(transform, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
             transform = glm::scale(transform, glm::vec3(1.0f, 1.0f, 1.0f));
             shader_data.model_ = transform;
-            shader_data.bindless_texture_index_ = albedo_tex->bindless_index_;
+            shader_data.bindless_albedo_index_ = albedo_tex->bindless_index_;
+            shader_data.bindless_metallic_index_ = metallic_tex->bindless_index_;
+            shader_data.bindless_normal_index_ = normal_tex->bindless_index_;
             shader_data.bindless_cube_index_ = sky_tex->bindless_index_;
             uniform_buffer.update(&shader_data);
 
@@ -346,6 +356,8 @@ int main(int argc, char *argv[]) {
     ctx->destory_shader(proc_frag_shader);
     ctx->destroy_image(depth_texture.get());
     ctx->destroy_image(albedo_tex.get());
+    ctx->destroy_image(metallic_tex.get());
+    ctx->destroy_image(normal_tex.get());
     ctx->destroy_image(sky_tex.get());
     // destroy window, instance and device
     ctx->destroy();

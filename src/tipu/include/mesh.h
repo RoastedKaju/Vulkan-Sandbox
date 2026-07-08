@@ -9,6 +9,7 @@ struct Vertex {
     glm::vec3 position_;
     glm::vec3 normal_;
     glm::vec2 uv_;
+    glm::vec4 tangent_;
 };
 
 struct MeshData {

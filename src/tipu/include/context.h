@@ -163,7 +163,7 @@ private:
     VmaAllocator allocator_{VK_NULL_HANDLE};
 
     // swap-chain
-    SwapChain swap_chain_;
+    SwapChain swap_chain_{};
 
     // bindless texture descriptors
     DescriptorRegistry descriptor_registry_;

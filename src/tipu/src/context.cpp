@@ -7,10 +7,10 @@
 #define VMA_IMPLEMENTATION
 // ReSharper disable once CppUnusedIncludeDirective
 #include <vma/vk_mem_alloc.h>
-#include <stb_image.h>
 
 #include "utils.h"
 #include "buffer.h"
+#include "importer.h"
 
 // debug callback
 // ReSharper disable once CppParameterMayBeConst
@@ -254,7 +254,7 @@ std::unique_ptr<Image> Context::create_texture(const TextureDesc &desc) const {
     return image;
 }
 
-std::unique_ptr<Image> Context::load_texture(const std::filesystem::path &path, VkFormat format) {
+std::unique_ptr<Image> Context::load_texture(const std::filesystem::path &path, const VkFormat format) {
     if (!std::filesystem::exists(path)) {
         throw std::runtime_error("Texture does not exist: " + path.string());
     }

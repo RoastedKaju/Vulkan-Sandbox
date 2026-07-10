@@ -3,7 +3,7 @@
 
 #include "utils.h"
 #include "context.h"
-#include "mesh.h"
+#include "model.h"
 #include "buffer.h"
 #include "shader.h"
 #include "pipeline.h"
@@ -87,8 +87,12 @@ int main(int argc, char *argv[]) {
     SDL_SetWindowRelativeMouseMode(window, true);
 
     // load model
-    Mesh loaded_mesh{};
-    loaded_mesh.load_mesh(("assets/models/gun.glb"));
+    Model gun_model{};
+    gun_model.load(ctx.get(), "assets/models/gun.glb");
+
+    const auto gun_verts = gun_model.meshes().at(0).data().vertices_;
+    const auto gun_indices = gun_model.meshes().at(0).data().indices_;
+
 
     // load textures
     std::unique_ptr<Image> albedo_tex = ctx->load_texture("assets/textures/gun/color.png",
@@ -108,8 +112,8 @@ int main(int argc, char *argv[]) {
         });
 
     // buffers for model
-    const VkDeviceSize v_buf_size = sizeof(Vertex) * loaded_mesh.data().vertices_.size();
-    const VkDeviceSize i_buf_size = sizeof(uint32_t) * loaded_mesh.data().indices_.size();
+    const VkDeviceSize v_buf_size = sizeof(Vertex) * gun_verts.size();
+    const VkDeviceSize i_buf_size = sizeof(uint32_t) * gun_indices.size();
 
     // vertex buffer
     BufferDesc v_buf_desc{
@@ -119,7 +123,7 @@ int main(int argc, char *argv[]) {
     };
     Buffer vertex_buffer{};
     vertex_buffer.create(v_buf_desc);
-    vertex_buffer.update(loaded_mesh.data().vertices_.data());
+    vertex_buffer.update(gun_verts.data());
 
     // index buffer
     BufferDesc i_buf_desc{
@@ -129,7 +133,7 @@ int main(int argc, char *argv[]) {
     };
     Buffer index_buffer{};
     index_buffer.create(i_buf_desc);
-    index_buffer.update(loaded_mesh.data().indices_.data());
+    index_buffer.update(gun_indices.data());
 
     // per frame uniform buffer
     BufferDesc u_buf_desc{
@@ -325,7 +329,7 @@ int main(int argc, char *argv[]) {
                 ctx->bind_index_buffer(index_buffer.get());
                 PushConstant pc{.data_address = uniform_buffer.address()};
                 ctx->cmd_push_constants(pipeline_layout, &pc);
-                ctx->draw_indexed(loaded_mesh.data().indices_.size());
+                ctx->draw_indexed(gun_indices.size());
             }
             ctx->end_rendering();
         }

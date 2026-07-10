@@ -3,7 +3,7 @@
 
 #include "utils.h"
 #include "context.h"
-#include "mesh.h"
+#include "model.h"
 #include "buffer.h"
 #include "shader.h"
 #include "pipeline.h"
@@ -85,33 +85,27 @@ int main(int argc, char *argv[]) {
     SDL_SetWindowRelativeMouseMode(window, true);
 
     // load model
-    Mesh loaded_mesh{};
-    loaded_mesh.load_mesh(("assets/models/cube.glb"));
+    Model cube_model{};
+    cube_model.load(ctx.get(), "assets/models/cube.glb");
+
+    const auto cube_verts = cube_model.meshes().at(0).data().vertices_;
+    const auto cube_indices = cube_model.meshes().at(0).data().indices_;
 
     // load texture
     std::unique_ptr<Image> camo_tex = ctx->load_texture("assets/textures/camo.jpg");
-    // std::unique_ptr<Image> sky_tex = ctx->load_cubemap(
-    //     {
-    //         "assets/textures/skybox/right.jpg",
-    //         "assets/textures/skybox/left.jpg",
-    //         "assets/textures/skybox/top.jpg",
-    //         "assets/textures/skybox/bottom.jpg",
-    //         "assets/textures/skybox/front.jpg",
-    //         "assets/textures/skybox/back.jpg",
-    //     });
     std::unique_ptr<Image> sky_tex = ctx->load_cubemap(
-    {
-        "assets/textures/farm/right.png",
-        "assets/textures/farm/left.png",
-        "assets/textures/farm/top.png",
-        "assets/textures/farm/bottom.png",
-        "assets/textures/farm/front.png",
-        "assets/textures/farm/back.png",
-    });
+        {
+            "assets/textures/farm/right.png",
+            "assets/textures/farm/left.png",
+            "assets/textures/farm/top.png",
+            "assets/textures/farm/bottom.png",
+            "assets/textures/farm/front.png",
+            "assets/textures/farm/back.png",
+        });
 
     // buffers for model
-    const VkDeviceSize v_buf_size = sizeof(Vertex) * loaded_mesh.data().vertices_.size();
-    const VkDeviceSize i_buf_size = sizeof(uint32_t) * loaded_mesh.data().indices_.size();
+    const VkDeviceSize v_buf_size = sizeof(Vertex) * cube_verts.size();
+    const VkDeviceSize i_buf_size = sizeof(uint32_t) * cube_indices.size();
 
     // vertex buffer
     BufferDesc v_buf_desc{
@@ -121,7 +115,7 @@ int main(int argc, char *argv[]) {
     };
     Buffer vertex_buffer{};
     vertex_buffer.create(v_buf_desc);
-    vertex_buffer.update(loaded_mesh.data().vertices_.data());
+    vertex_buffer.update(cube_verts.data());
 
     // index buffer
     BufferDesc i_buf_desc{
@@ -131,7 +125,7 @@ int main(int argc, char *argv[]) {
     };
     Buffer index_buffer{};
     index_buffer.create(i_buf_desc);
-    index_buffer.update(loaded_mesh.data().indices_.data());
+    index_buffer.update(cube_indices.data());
 
     // per frame uniform buffer
     BufferDesc u_buf_desc{
@@ -323,7 +317,7 @@ int main(int argc, char *argv[]) {
                 ctx->bind_index_buffer(index_buffer.get());
                 PushConstant pc{.data_address = uniform_buffer.address()};
                 ctx->cmd_push_constants(pipeline_layout, &pc);
-                ctx->draw_indexed(loaded_mesh.data().indices_.size());
+                ctx->draw_indexed(cube_indices.size());
             }
             ctx->end_rendering();
         }

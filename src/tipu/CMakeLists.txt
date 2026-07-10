@@ -12,12 +12,13 @@ target_link_libraries(Tipu
         PUBLIC volk
         PUBLIC GPUOpen::VulkanMemoryAllocator
         PUBLIC glm::glm
-        PUBLIC TinyGLTF
         PUBLIC ImGUI
+        PUBLIC STB
+        PUBLIC assimp
 )
 
 target_compile_definitions(Tipu PUBLIC VK_NO_PROTOTYPES)
 target_compile_definitions(Tipu PUBLIC GLM_FORCE_RADIANS GLM_FORCE_DEPTH_ZERO_TO_ONE)
 
 # Shader-C linking
-target_link_libraries(Tipu PUBLIC shaderc_shared)
+target_link_libraries(Tipu PRIVATE shaderc_shared)

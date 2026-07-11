@@ -2,7 +2,9 @@
 
 #include <format>
 #include <iostream>
+#include <ranges>
 
+#include <volk.h>
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
@@ -10,7 +12,6 @@
 #include "utils.h"
 #include "importer.h"
 #include "context.h"
-
 
 bool Model::load(Context *context, const std::filesystem::path &path) {
     context_ = context;
@@ -34,16 +35,56 @@ bool Model::load(Context *context, const std::filesystem::path &path) {
 
     directory_ = path.parent_path();
     meshes_.clear();
-    loaded_textures_.clear();
+    texture_cache_.clear();
+
+    // reserve materials first as mesh keeps raw pointers to materials so relocation will cause invalid pointers
+    materials_.clear();
+    materials_.reserve(scene->mNumMaterials);
+    for (unsigned int i = 0; i < scene->mNumMaterials; ++i) {
+        materials_.push_back(process_material(scene, scene->mMaterials[i]));
+    }
 
     process_node(scene->mRootNode, scene);
     return true;
 }
 
+VkFormat Model::determine_format(const aiTextureType ai_type) {
+    switch (ai_type) {
+        case aiTextureType_DIFFUSE:
+        case aiTextureType_BASE_COLOR:
+        case aiTextureType_EMISSIVE:
+        case aiTextureType_EMISSION_COLOR:
+            return VK_FORMAT_R8G8B8A8_SRGB;
+        case aiTextureType_NORMALS:
+        case aiTextureType_HEIGHT:
+        case aiTextureType_METALNESS:
+        case aiTextureType_DIFFUSE_ROUGHNESS:
+        case aiTextureType_AMBIENT_OCCLUSION:
+        case aiTextureType_LIGHTMAP:
+        case aiTextureType_UNKNOWN:
+        default:
+            return VK_FORMAT_R8G8B8A8_UNORM;
+    }
+}
+
+void Model::destroy_textures() {
+    for (const auto &texture: texture_cache_ | std::views::values) {
+        if (!texture || !texture->image_) {
+            continue;
+        }
+        if (texture->image_->view_ != VK_NULL_HANDLE) {
+            vkDestroyImageView(context_->get_device(), texture->image_->view_, nullptr);
+        }
+        if (texture->image_->image_ != VK_NULL_HANDLE && texture->image_->allocation_ != VK_NULL_HANDLE) {
+            vmaDestroyImage(context_->get_allocator(), texture->image_->image_, texture->image_->allocation_);
+        }
+    }
+}
+
 void Model::process_node(const aiNode *node, const aiScene *scene) {
     meshes_.reserve(meshes_.size() + node->mNumMeshes);
 
-    for (auto i = 0; i < node->mNumMeshes; ++i) {
+    for (unsigned int i = 0; i < node->mNumMeshes; ++i) {
         const aiMesh *mesh = scene->mMeshes[node->mMeshes[i]];
         meshes_.push_back(process_mesh(mesh, scene));
     }
@@ -93,50 +134,104 @@ Mesh Model::process_mesh(const aiMesh *mesh, const aiScene *scene) {
         }
     }
 
-    std::vector<Texture> textures;
-    // const aiMaterial *material = scene->mMaterials[mesh->mMaterialIndex];
-    //
-    // auto append = [&textures](std::vector<Texture> loaded) {
-    //     textures.insert(textures.end(),
-    //                     std::make_move_iterator(loaded.begin()),
-    //                     std::make_move_iterator(loaded.end()));
-    // };
-    //
-    // append(load_material_textures(material, aiTextureType_DIFFUSE, TextureType::Diffuse));
-    // append(load_material_textures(material, aiTextureType_SPECULAR, TextureType::Specular));
-    // append(load_material_textures(material, aiTextureType_NORMALS, TextureType::Normal));
-    // append(load_material_textures(material, aiTextureType_HEIGHT, TextureType::Height));
-
-    return Mesh(std::move(data), std::move(textures));
-}
-
-std::vector<Texture> Model::load_material_textures(const aiMaterial *material,
-                                                   const aiTextureType ai_type,
-                                                   const TextureType type) {
-    std::vector<Texture> textures;
-    const unsigned int count = material->GetTextureCount(ai_type);
-    textures.reserve(count);
-
-    for (unsigned int i = 0; i < count; ++i) {
-        aiString ai_path;
-        material->GetTexture(ai_type, i, &ai_path);
-
-        const std::string key = ai_path.C_Str();
-        if (const auto cached = loaded_textures_.find(key); cached != loaded_textures_.end()) {
-            textures.push_back(cached->second);
-            continue;
-        }
-
-        const std::filesystem::path texture_path = directory_ / ai_path.C_Str();
-
-        Texture texture;
-        texture.image_ = context_->load_texture(texture_path);
-        texture.type_ = type;
-        texture.path_ = texture_path;
-
-        loaded_textures_.emplace(key, texture);
-        textures.push_back(texture);
+    Material *material = nullptr;
+    if (mesh->mMaterialIndex < materials_.size()) {
+        material = &materials_[mesh->mMaterialIndex];
     }
 
-    return textures;
+    return Mesh(std::move(data), material);
+}
+
+Material Model::process_material(const aiScene *scene, const aiMaterial *ai_material) {
+    Material material;
+
+    // PBR base color and albedo, older formats fall back to diffuse
+    material.base_color_ = load_material_texture(scene, ai_material, aiTextureType_BASE_COLOR);
+    if (!material.base_color_) {
+        material.base_color_ = load_material_texture(scene, ai_material, aiTextureType_DIFFUSE);
+    }
+
+    material.normal_ = load_material_texture(scene, ai_material, aiTextureType_NORMALS);
+    if (!material.normal_) {
+        material.normal_ = load_material_texture(scene, ai_material, aiTextureType_HEIGHT);
+    }
+
+    material.metallic_roughness_ = load_material_texture(scene, ai_material, aiTextureType_METALNESS);
+    if (!material.metallic_roughness_) {
+        material.metallic_roughness_ = load_material_texture(scene, ai_material, aiTextureType_DIFFUSE_ROUGHNESS);
+    }
+    if (!material.metallic_roughness_) {
+        material.metallic_roughness_ = load_material_texture(scene, ai_material, aiTextureType_UNKNOWN);
+    }
+
+    material.occlusion_ = load_material_texture(scene, ai_material, aiTextureType_AMBIENT_OCCLUSION);
+    if (!material.occlusion_) {
+        material.occlusion_ = load_material_texture(scene, ai_material, aiTextureType_LIGHTMAP);
+    }
+    if (!material.occlusion_ && material.metallic_roughness_) {
+        material.occlusion_ = material.metallic_roughness_;
+    }
+
+    material.emissive_ = load_material_texture(scene, ai_material, aiTextureType_EMISSION_COLOR);
+    if (!material.emissive_) {
+        material.emissive_ = load_material_texture(scene, ai_material, aiTextureType_EMISSIVE);
+    }
+
+    if (aiColor4D base_color; AI_SUCCESS == ai_material->Get(AI_MATKEY_BASE_COLOR, base_color)) {
+        material.base_color_factor_ = {base_color.r, base_color.g, base_color.b, base_color.a};
+    } else if (aiColor3D diffuse; AI_SUCCESS == ai_material->Get(AI_MATKEY_COLOR_DIFFUSE, diffuse)) {
+        material.base_color_factor_ = {diffuse.r, diffuse.g, diffuse.b, 1.0f};
+    }
+
+    ai_material->Get(AI_MATKEY_METALLIC_FACTOR, material.metallic_factor_);
+    ai_material->Get(AI_MATKEY_ROUGHNESS_FACTOR, material.roughness_factor_);
+
+    if (float emissive_intensity = 1.0f; AI_SUCCESS == ai_material->Get(
+                                             AI_MATKEY_EMISSIVE_INTENSITY, emissive_intensity)) {
+        material.emissive_strength_ = emissive_intensity;
+    }
+
+    return material;
+}
+
+std::shared_ptr<Texture> Model::load_material_texture(const aiScene *scene,
+                                                      const aiMaterial *material,
+                                                      const aiTextureType ai_type,
+                                                      const unsigned int index) {
+    if (material->GetTextureCount(ai_type) <= index) {
+        return nullptr;
+    }
+
+    aiString ai_path;
+    if (material->GetTexture(ai_type, index, &ai_path) != AI_SUCCESS) {
+        return nullptr;
+    }
+
+    const std::string key = ai_path.C_Str();
+    if (const auto cached = texture_cache_.find(key); cached != texture_cache_.end()) {
+        return cached->second;
+    }
+
+    auto texture = std::make_shared<Texture>();
+    const VkFormat format = determine_format(ai_type);
+
+    // Check if the texture is embedded
+    if (const auto *ai_embedded_texture = scene->GetEmbeddedTexture(ai_path.C_Str())) {
+        texture->path_ = "embedded_" + key;
+
+        // If mHeight == 0, this is the compressed file
+        texture->image_ = context_->load_texture_memory(
+            reinterpret_cast<unsigned char *>(ai_embedded_texture->pcData),
+            ai_embedded_texture->mWidth,
+            ai_embedded_texture->mHeight,
+            format
+        );
+    } else {
+        const std::filesystem::path texture_path = directory_ / ai_path.C_Str();
+        texture->path_ = texture_path;
+        texture->image_ = context_->load_texture(texture_path, format);
+    }
+
+    texture_cache_.emplace(key, texture);
+    return texture;
 }

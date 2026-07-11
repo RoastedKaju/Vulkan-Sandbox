@@ -3,6 +3,9 @@
 #include <filesystem>
 #include <utility>
 #include <vector>
+#include <unordered_map>
+#include <utility>
+#include <memory>
 
 #include <glm/glm.hpp>
 #include <assimp/material.h>
@@ -28,17 +31,22 @@ struct MeshData {
     std::vector<uint32_t> indices_;
 };
 
-enum class TextureType {
-    Diffuse,
-    Specular,
-    Normal,
-    Height
-};
-
 struct Texture {
     std::shared_ptr<Image> image_;
-    TextureType type_ = TextureType::Diffuse;
     std::filesystem::path path_;
+};
+
+struct Material {
+    std::shared_ptr<Texture> base_color_;
+    std::shared_ptr<Texture> normal_;
+    std::shared_ptr<Texture> metallic_roughness_;
+    std::shared_ptr<Texture> occlusion_;
+    std::shared_ptr<Texture> emissive_;
+
+    glm::vec4 base_color_factor_{1.0f};
+    float metallic_factor_ = 1.0f;
+    float roughness_factor_ = 1.0f;
+    float emissive_strength_ = 1.0f;
 };
 
 /**
@@ -48,19 +56,18 @@ class Mesh {
 public:
     Mesh() = default;
 
-    Mesh(MeshData data, std::vector<Texture> textures)
-        : data_(std::move(data)), textures_(std::move(textures)) {
+    Mesh(MeshData data, Material *material)
+        : data_(std::move(data)), material_(material) {
     }
 
     MeshData &data() { return data_; }
     const MeshData &data() const { return data_; }
 
-    std::vector<Texture> &textures() { return textures_; }
-    const std::vector<Texture> &textures() const { return textures_; }
+    Material *material() const { return material_; }
 
 private:
     MeshData data_;
-    std::vector<Texture> textures_;
+    Material *material_;
 };
 
 /***
@@ -72,22 +79,36 @@ public:
 
     bool load(Context *context, const std::filesystem::path &path);
 
+    // get meshes
     std::vector<Mesh> &meshes() { return meshes_; }
     const std::vector<Mesh> &meshes() const { return meshes_; }
-
+    // get materials
+    std::vector<Material> &materials() { return materials_; }
+    const std::vector<Material> &materials() const { return materials_; }
+    // get directory
     const std::filesystem::path &directory() const { return directory_; }
+
+    static VkFormat determine_format(aiTextureType ai_type);
+
+    void destroy_textures();
 
 private:
     void process_node(const aiNode *node, const aiScene *scene);
 
     Mesh process_mesh(const aiMesh *mesh, const aiScene *scene);
 
-    std::vector<Texture> load_material_textures(const aiMaterial *material, aiTextureType ai_type, TextureType type);
+    Material process_material(const aiScene *scene, const aiMaterial *ai_material);
+
+    std::shared_ptr<Texture> load_material_texture(const aiScene *scene,
+                                                   const aiMaterial *material,
+                                                   aiTextureType ai_type,
+                                                   unsigned int index = 0);
 
     std::vector<Mesh> meshes_;
+    std::vector<Material> materials_;
     std::filesystem::path directory_;
 
-    std::unordered_map<std::string, Texture> loaded_textures_;
+    std::unordered_map<std::string, std::shared_ptr<Texture> > texture_cache_;
 
     Context *context_;
 };

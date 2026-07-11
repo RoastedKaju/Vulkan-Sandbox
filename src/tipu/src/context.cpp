@@ -46,6 +46,24 @@ VkCommandBuffer Context::get_current_cmd_buf() const {
     return frame_data_.command_buffers_[frame_index];
 }
 
+VkSampleCountFlagBits Context::get_max_usable_sample_count() const {
+    VkPhysicalDeviceProperties properties;
+    vkGetPhysicalDeviceProperties(physical_device_, &properties);
+
+    const VkSampleCountFlags counts =
+            properties.limits.framebufferColorSampleCounts &
+            properties.limits.framebufferDepthSampleCounts;
+
+    if (counts & VK_SAMPLE_COUNT_64_BIT) return VK_SAMPLE_COUNT_64_BIT;
+    if (counts & VK_SAMPLE_COUNT_32_BIT) return VK_SAMPLE_COUNT_32_BIT;
+    if (counts & VK_SAMPLE_COUNT_16_BIT) return VK_SAMPLE_COUNT_16_BIT;
+    if (counts & VK_SAMPLE_COUNT_8_BIT) return VK_SAMPLE_COUNT_8_BIT;
+    if (counts & VK_SAMPLE_COUNT_4_BIT) return VK_SAMPLE_COUNT_4_BIT;
+    if (counts & VK_SAMPLE_COUNT_2_BIT) return VK_SAMPLE_COUNT_2_BIT;
+
+    return VK_SAMPLE_COUNT_1_BIT;
+}
+
 bool Context::create_instance(const char *app_name) {
     VkApplicationInfo app_info{
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -182,6 +200,9 @@ bool Context::setup_device(const uint32_t device_index) {
         .instance = instance_
     };
     check(vmaCreateAllocator(&allocator_create_info, &allocator_));
+
+    // MSAA samples
+    msaa_samples_ = get_max_usable_sample_count();
 
     return true;
 }
@@ -364,6 +385,120 @@ std::unique_ptr<Image> Context::load_texture(const std::filesystem::path &path, 
     return image;
 }
 
+std::unique_ptr<Image> Context::load_texture_memory(const unsigned char *buffer_data,
+                                                    const uint32_t width,
+                                                    const uint32_t height,
+                                                    VkFormat format) {
+    int w = 0;
+    int h = 0;
+    int channels = 0;
+    unsigned char *pixels = nullptr;
+
+    if (height == 0) {
+        pixels = stbi_load_from_memory(buffer_data,
+                                       static_cast<int>(width),
+                                       &w, &h,
+                                       &channels,
+                                       STBI_rgb_alpha);
+    }
+
+    if (!pixels) {
+        throw std::runtime_error("Failed to load embedded texture from memory.");
+    }
+
+    // TODO: convert this to another function since we are reusing it in standard load texture as well.
+    const TextureDesc texture_desc{
+        .dimension_ = {static_cast<uint32_t>(w), static_cast<uint32_t>(h)},
+        .depth_ = 1,
+        .mip_levels_ = 1,
+        .array_layers_ = 1,
+        .samples_ = VK_SAMPLE_COUNT_1_BIT,
+        .tiling_ = VK_IMAGE_TILING_OPTIMAL,
+        .usage_ = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .aspect_ = VK_IMAGE_ASPECT_COLOR_BIT,
+        .format_ = format,
+        .prefer_dedicated_alloc_ = false
+    };
+
+    auto image = create_texture(texture_desc);
+
+    // Upload pixel data
+    const VkDeviceSize data_size = static_cast<VkDeviceSize>(w) * h * 4;
+    const BufferDesc buf_desc{
+        .context = this,
+        .usage_flags = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        .size = data_size,
+        .per_frame = false
+    };
+    Buffer data_buffer{};
+    data_buffer.create(buf_desc);
+    data_buffer.update(pixels);
+
+    stbi_image_free(pixels);
+
+    constexpr VkFenceCreateInfo fence_one_time_create_info{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkFence fence_one_time{};
+    check(vkCreateFence(device_, &fence_one_time_create_info, nullptr, &fence_one_time));
+    VkCommandBuffer cmd_buf_one_time{};
+    const VkCommandBufferAllocateInfo cmd_buf_alloc_info{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = command_pool_,
+        .commandBufferCount = 1
+    };
+    check(vkAllocateCommandBuffers(device_, &cmd_buf_alloc_info, &cmd_buf_one_time));
+    constexpr VkCommandBufferBeginInfo cmd_buf_one_time_begin{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
+    check(vkBeginCommandBuffer(cmd_buf_one_time, &cmd_buf_one_time_begin));
+
+    transition_image(cmd_buf_one_time,
+                     *image,
+                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                     VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                     VK_PIPELINE_STAGE_2_TRANSFER_BIT);
+
+    const VkBufferImageCopy copy_region{
+        .bufferOffset = 0,
+        .imageSubresource{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
+        .imageExtent{
+            .width = static_cast<uint32_t>(texture_desc.dimension_[0]),
+            .height = static_cast<uint32_t>(texture_desc.dimension_[1]), .depth = 1
+        }
+    };
+    vkCmdCopyBufferToImage(
+        cmd_buf_one_time,
+        data_buffer.get(),
+        image->image_,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1,
+        &copy_region);
+
+    transition_image(cmd_buf_one_time,
+                     *image,
+                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                     VK_ACCESS_2_SHADER_READ_BIT,
+                     VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+
+    check(vkEndCommandBuffer(cmd_buf_one_time));
+
+    const VkSubmitInfo one_time_submit_info{
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd_buf_one_time
+    };
+    check(vkQueueSubmit(queue_, 1, &one_time_submit_info, fence_one_time));
+    check(vkWaitForFences(device_, 1, &fence_one_time, VK_TRUE, UINT64_MAX));
+
+    vkDestroyFence(device_, fence_one_time, nullptr);
+    vkFreeCommandBuffers(device_, command_pool_, 1, &cmd_buf_one_time);
+    vmaDestroyBuffer(allocator_, data_buffer.get(), data_buffer.get_allocation());
+
+    image->bindless_index_ = descriptor_registry_.register_texture(image->view_, default_sampler_);
+
+    return image;
+}
+
 std::unique_ptr<Image> Context::load_cubemap(const std::array<std::filesystem::path, 6> &paths) {
     int width = 0;
     int height = 0;
@@ -526,7 +661,7 @@ std::unique_ptr<Image> Context::load_cubemap(const std::array<std::filesystem::p
     vkFreeCommandBuffers(device_, command_pool_, 1, &cmd_buf_one_time);
     vmaDestroyBuffer(allocator_, data_buffer.get(), data_buffer.get_allocation());
 
-    // Register into the CUBE bindless array (separate binding/array from sampler2D)
+    // Register into the cube bindless array
     image->bindless_index_ = descriptor_registry_.register_cubemap(image->view_, default_sampler_);
 
     return image;

@@ -60,6 +60,11 @@ public:
 
     std::unique_ptr<Image> load_texture(const std::filesystem::path &path, VkFormat format = VK_FORMAT_R8G8B8A8_UNORM);
 
+    std::unique_ptr<Image> load_texture_memory(const unsigned char *buffer_data,
+                                               uint32_t width,
+                                               uint32_t height,
+                                               VkFormat format);
+
     std::unique_ptr<Image> load_cubemap(const std::array<std::filesystem::path, 6> &paths);
 
     VkFormat get_device_depth_format() const;
@@ -105,6 +110,10 @@ public:
 
     Image *get_current_swap_chain_image();
 
+    VkCommandBuffer get_current_cmd_buf() const;
+
+    VkSampleCountFlagBits get_max_usable_sample_count() const;
+
     VkDevice get_device() const { return device_; }
     VkInstance get_instance() const { return instance_; }
     VkPhysicalDevice get_physical_device() const { return physical_device_; }
@@ -120,8 +129,6 @@ public:
     VkQueue get_queue() const { return queue_; }
     uint32_t get_family_index() const { return queue_family_index_; }
     VkSampler get_default_sampler() const { return default_sampler_; }
-
-    VkCommandBuffer get_current_cmd_buf() const;
 
 private:
     bool create_instance(const char *app_name = "default");
@@ -175,6 +182,7 @@ private:
     FrameData frame_data_;
 
     VkSampler default_sampler_{VK_NULL_HANDLE};
+    VkSampleCountFlagBits msaa_samples_;
 
     friend class SwapChain;
     friend class Buffer;

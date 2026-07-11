@@ -5,17 +5,17 @@
 
 layout (push_constant) uniform PushConstants {
     uint64_t address;
+    mat4 model;
+    uint albedo;
+    uint metallic;
+    uint normal;
 };
 
 struct ShaderData {
     mat4 projection;
     mat4 view;
-    mat4 model;
     vec3 camera;
-    uint albedo_index;
-    uint metallic_index;
-    uint normal_index;
-    uint cubemap_index;
+    uint cubemap;
 };
 
 layout (buffer_reference, scalar) readonly buffer ShaderDataRef {
@@ -46,7 +46,7 @@ void main() {
     vec4 worldPos = sceneData.model * vec4(inPosition, 1.0);
 
     // Normal calculation
-    mat3 normalMatrix = transpose(inverse(mat3(sceneData.model)));
+    mat3 normalMatrix = transpose(inverse(mat3(model)));
 
     vec3 N = normalize(normalMatrix * inNormal);
     vec3 T = normalize(normalMatrix * inTangent.xyz);
@@ -61,10 +61,10 @@ void main() {
     outWorldNormal = normalize(normalMatrix * inNormal);
     outUV = inUV;
 
-    outAlbedoIndex = sceneData.albedo_index;
-    outMetallicIndex = sceneData.metallic_index;
-    outNormalIndex = sceneData.normal_index;
-    outCubeIndex = sceneData.cubemap_index;
+    outAlbedoIndex = albedo;
+    outMetallicIndex = metallic;
+    outNormalIndex = normal;
+    outCubeIndex = sceneData.cubemap;
     outCameraPos = sceneData.camera;
 
     // Final clip-space position

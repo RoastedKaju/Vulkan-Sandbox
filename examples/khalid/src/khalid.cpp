@@ -16,13 +16,13 @@ struct ShaderData {
     glm::mat4 view_;
     glm::mat4 model_;
     glm::vec3 camera_;
-    uint32_t bindless_albedo_index_;
-    uint32_t bindless_metallic_index_;
-    uint32_t bindless_normal_index_;
-    uint32_t bindless_cube_index_;
+    uint32_t bindless_albedo_;
+    uint32_t bindless_metallic_;
+    uint32_t bindless_normal_;
+    uint32_t bindless_cube_;
 };
 
-struct PushConstant {
+struct alignas(16) PushConstant {
     VkDeviceAddress data_address;
 };
 
@@ -33,11 +33,11 @@ struct Camera {
     glm::vec3 worldUp = glm::vec3(0.0f, 1.0f, 0.0f);
     glm::vec3 right = glm::vec3(1.0f, 0.0f, 0.0f);
 
-    float yaw = -90.0f; // facing -Z initially
+    float yaw = -90.0f;
     float pitch = 0.0f;
 
-    float moveSpeed = 5.0f; // units per second
-    float mouseSens = 0.1f; // degrees per pixel
+    float speed_ = 5.0f;
+    float sensitivity_ = 0.1f;
 
     void update() {
         glm::vec3 newFront;
@@ -49,8 +49,8 @@ struct Camera {
         up = glm::normalize(glm::cross(right, front));
     }
 
-    void process_keyboard(const bool *keys, float dt) {
-        float velocity = moveSpeed * dt;
+    void process_keyboard(const bool *keys, const float dt) {
+        const float velocity = speed_ * dt;
 
         if (keys[SDL_SCANCODE_W]) position += front * velocity;
         if (keys[SDL_SCANCODE_S]) position -= front * velocity;
@@ -60,9 +60,9 @@ struct Camera {
         if (keys[SDL_SCANCODE_LCTRL]) position -= worldUp * velocity;
     }
 
-    void process_mouse(float xrel, float yrel) {
-        yaw += xrel * mouseSens;
-        pitch -= yrel * mouseSens; // inverted so mouse-up looks up
+    void process_mouse(const float xrel, const float yrel) {
+        yaw += xrel * sensitivity_;
+        pitch -= yrel * sensitivity_; // inverted
 
         if (pitch > 89.0f) pitch = 89.0f;
         if (pitch < -89.0f) pitch = -89.0f;
@@ -87,20 +87,42 @@ int main(int argc, char *argv[]) {
     SDL_SetWindowRelativeMouseMode(window, true);
 
     // load model
-    Model gun_model{};
-    gun_model.load(ctx.get(), "assets/models/gun.glb");
+    Model tank_model{};
+    tank_model.load(ctx.get(), "assets/models/khalid/scene.gltf");
+    // tank_model.load(ctx.get(), "assets/models/toy.glb");
 
-    const auto gun_verts = gun_model.meshes().at(0).data().vertices_;
-    const auto gun_indices = gun_model.meshes().at(0).data().indices_;
+    std::cout << "MESHES COUNT: " << tank_model.meshes().size() << std::endl;
 
+    std::vector<MeshData> tank_meshes_data;
+    std::vector<Buffer> vert_buffers;
+    std::vector<Buffer> index_buffers;
 
-    // load textures
-    std::unique_ptr<Image> albedo_tex = ctx->load_texture("assets/textures/gun/color.png",
-                                                          VK_FORMAT_R8G8B8A8_SRGB);
-    std::unique_ptr<Image> metallic_tex = ctx->load_texture("assets/textures/gun/metallic.png",
-                                                            VK_FORMAT_R8G8B8A8_UNORM);
-    std::unique_ptr<Image> normal_tex = ctx->load_texture("assets/textures/gun/normal.png",
-                                                          VK_FORMAT_R8G8B8A8_UNORM);
+    for (auto i = 0; i < tank_model.meshes().size(); ++i) {
+        // copy data
+        tank_meshes_data.push_back(tank_model.meshes().at(i).data());
+        // vertices
+        const VkDeviceSize v_buf_size = sizeof(Vertex) * tank_meshes_data.back().vertices_.size();
+        BufferDesc v_buf_desc{
+            .context = ctx.get(),
+            .usage_flags = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            .size = v_buf_size
+        };
+        vert_buffers.emplace_back(Buffer{});
+        vert_buffers.back().create(v_buf_desc);
+        vert_buffers.back().update(tank_meshes_data.back().vertices_.data());
+        // indices
+        const VkDeviceSize i_buf_size = sizeof(uint32_t) * tank_meshes_data.back().indices_.size();
+        BufferDesc i_buf_desc{
+            .context = ctx.get(),
+            .usage_flags = VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+            .size = i_buf_size
+        };
+        index_buffers.emplace_back(Buffer{});
+        index_buffers.back().create(i_buf_desc);
+        index_buffers.back().update(tank_meshes_data.back().indices_.data());
+    }
+
+    // cubemap texture
     std::unique_ptr<Image> sky_tex = ctx->load_cubemap(
         {
             "assets/textures/farm/right.png",
@@ -110,30 +132,8 @@ int main(int argc, char *argv[]) {
             "assets/textures/farm/front.png",
             "assets/textures/farm/back.png",
         });
-
-    // buffers for model
-    const VkDeviceSize v_buf_size = sizeof(Vertex) * gun_verts.size();
-    const VkDeviceSize i_buf_size = sizeof(uint32_t) * gun_indices.size();
-
-    // vertex buffer
-    BufferDesc v_buf_desc{
-        .context = ctx.get(),
-        .usage_flags = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        .size = v_buf_size
-    };
-    Buffer vertex_buffer{};
-    vertex_buffer.create(v_buf_desc);
-    vertex_buffer.update(gun_verts.data());
-
-    // index buffer
-    BufferDesc i_buf_desc{
-        .context = ctx.get(),
-        .usage_flags = VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-        .size = i_buf_size
-    };
-    Buffer index_buffer{};
-    index_buffer.create(i_buf_desc);
-    index_buffer.update(gun_indices.data());
+    // default texture
+    std::unique_ptr<Image> default_tex = ctx->load_texture("assets/textures/camo.jpg");
 
     // per frame uniform buffer
     BufferDesc u_buf_desc{
@@ -144,6 +144,7 @@ int main(int argc, char *argv[]) {
     };
     Buffer uniform_buffer{};
     uniform_buffer.create(u_buf_desc);
+
     BufferDesc proc_u_buf_desc{
         .context = ctx.get(),
         .usage_flags = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
@@ -276,24 +277,11 @@ int main(int argc, char *argv[]) {
 
         ctx->acquire_command_buffer();
         {
-            // gun draw
-            auto transform = glm::mat4(1.0f);
-            transform = glm::translate(transform, glm::vec3(0.0f, 0.0f, 0.0f));
-            transform = glm::rotate(transform, glm::radians(45.0f * (time * 0.05f)), glm::vec3(0.0f, 1.0f, 0.0f));
-            transform = glm::rotate(transform, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-            transform = glm::scale(transform, glm::vec3(1.0f, 1.0f, 1.0f));
-            shader_data.model_ = transform;
-            shader_data.bindless_albedo_index_ = albedo_tex->bindless_index_;
-            shader_data.bindless_metallic_index_ = metallic_tex->bindless_index_;
-            shader_data.bindless_normal_index_ = normal_tex->bindless_index_;
-            shader_data.bindless_cube_index_ = sky_tex->bindless_index_;
-            uniform_buffer.update(&shader_data);
-
-            // proc draw
+            // skybox
             ShaderData proc_shader_data{};
             proc_shader_data.projection_ = shader_data.projection_;
             proc_shader_data.view_ = shader_data.view_;
-            proc_shader_data.bindless_cube_index_ = sky_tex->bindless_index_;
+            proc_shader_data.bindless_cube_ = sky_tex->bindless_index_;
             proc_uniform_buffer.update(&proc_shader_data);
 
             // attachments
@@ -325,11 +313,40 @@ int main(int argc, char *argv[]) {
 
                 // model
                 ctx->bind_pipeline(pipeline);
-                ctx->bind_vertex_buffer(vertex_buffer.get());
-                ctx->bind_index_buffer(index_buffer.get());
-                PushConstant pc{.data_address = uniform_buffer.address()};
-                ctx->cmd_push_constants(pipeline_layout, &pc);
-                ctx->draw_indexed(gun_indices.size());
+                for (auto i = 0; i < tank_model.meshes().size(); ++i) {
+                    const auto &mat = tank_model.meshes().at(i).material();
+
+                    auto transform = glm::mat4(1.0f);
+                    transform = glm::translate(transform, glm::vec3(0.0f, 0.0f, 0.0f));
+                    transform = glm::rotate(transform,
+                                            glm::radians(45.0f * (time * 0.05f)), glm::vec3(0.0f, 1.0f, 0.0f));
+                    transform = glm::rotate(transform, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+                    transform = glm::scale(transform, glm::vec3(1.0f, 1.0f, 1.0f));
+                    shader_data.model_ = transform;
+                    shader_data.bindless_albedo_ =
+                            mat->base_color_
+                                ? mat->base_color_->image_->bindless_index_
+                                : default_tex->bindless_index_;
+
+                    shader_data.bindless_normal_ =
+                            mat->normal_
+                                ? mat->normal_->image_->bindless_index_
+                                : default_tex->bindless_index_;
+
+                    shader_data.bindless_metallic_ =
+                            mat->metallic_roughness_
+                                ? mat->metallic_roughness_->image_->bindless_index_
+                                : default_tex->bindless_index_;
+
+                    shader_data.bindless_cube_ = sky_tex->bindless_index_;
+                    uniform_buffer.update(&shader_data);
+
+                    ctx->bind_vertex_buffer(vert_buffers.at(i).get());
+                    ctx->bind_index_buffer(index_buffers.at(i).get());
+                    PushConstant pc{.data_address = uniform_buffer.address()};
+                    ctx->cmd_push_constants(pipeline_layout, &pc);
+                    ctx->draw_indexed(tank_meshes_data.at(i).indices_.size());
+                }
             }
             ctx->end_rendering();
         }
@@ -347,8 +364,10 @@ int main(int argc, char *argv[]) {
     // waits for device to be idle
     ctx->wait_idle();
     // clean up resources
-    vertex_buffer.destroy();
-    index_buffer.destroy();
+    for (auto i = 0; i < tank_model.meshes().size(); ++i) {
+        vert_buffers.at(i).destroy();
+        index_buffers.at(i).destroy();
+    }
     uniform_buffer.destroy();
     proc_uniform_buffer.destroy();
     ctx->destroy_pipeline_layout(pipeline_layout);
@@ -359,11 +378,9 @@ int main(int argc, char *argv[]) {
     ctx->destory_shader(proc_vert_shader);
     ctx->destory_shader(proc_frag_shader);
     ctx->destroy_image(depth_texture.get());
-    ctx->destroy_image(albedo_tex.get());
-    ctx->destroy_image(metallic_tex.get());
-    ctx->destroy_image(normal_tex.get());
+    tank_model.destroy_textures();
     ctx->destroy_image(sky_tex.get());
-    gun_model.destroy_textures();
+    ctx->destroy_image(default_tex.get());
     // destroy window, instance and device
     ctx->destroy();
 

@@ -14,14 +14,16 @@ constexpr uint32_t kHeight = 720u;
 struct ShaderData {
     glm::mat4 projection_;
     glm::mat4 view_;
-    glm::mat4 model_;
     glm::vec3 camera_;
-    uint32_t bindless_texture_index_;
-    uint32_t bindless_cube_index_;
+    uint32_t bindless_cube_;
 };
 
-struct PushConstant {
+struct alignas(16) PushConstant {
+    glm::mat4 model_;
     VkDeviceAddress data_address;
+    uint32_t bindless_albedo_;
+    uint32_t bindless_metallic_;
+    uint32_t bindless_normal_;
 };
 
 struct Camera {
@@ -267,21 +269,19 @@ int main(int argc, char *argv[]) {
 
         ctx->acquire_command_buffer();
         {
-            // camo draw
+            // cube
             auto transform = glm::mat4(1.0f);
             transform = glm::translate(transform, glm::vec3(0.0f, 0.0f, 0.0f));
             transform = glm::rotate(transform, glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             transform = glm::scale(transform, glm::vec3(1.0f, 1.0f, 1.0f));
-            shader_data.model_ = transform;
-            shader_data.bindless_texture_index_ = camo_tex->bindless_index_;
-            shader_data.bindless_cube_index_ = sky_tex->bindless_index_;
+            shader_data.bindless_cube_ = sky_tex->bindless_index_;
             uniform_buffer.update(&shader_data);
 
-            // proc draw
+            // skybox
             ShaderData proc_shader_data{};
             proc_shader_data.projection_ = shader_data.projection_;
             proc_shader_data.view_ = shader_data.view_;
-            proc_shader_data.bindless_cube_index_ = sky_tex->bindless_index_;
+            proc_shader_data.bindless_cube_ = sky_tex->bindless_index_;
             proc_uniform_buffer.update(&proc_shader_data);
 
             // attachments
@@ -316,6 +316,8 @@ int main(int argc, char *argv[]) {
                 ctx->bind_vertex_buffer(vertex_buffer.get());
                 ctx->bind_index_buffer(index_buffer.get());
                 PushConstant pc{.data_address = uniform_buffer.address()};
+                pc.model_ = transform;
+                pc.bindless_albedo_ = camo_tex->bindless_index_;
                 ctx->cmd_push_constants(pipeline_layout, &pc);
                 ctx->draw_indexed(cube_indices.size());
             }

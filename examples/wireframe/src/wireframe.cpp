@@ -254,6 +254,7 @@ int main(int argc, char *argv[]) {
     ctx->destory_shader(frag_shader);
     ctx->destroy_image(depth_texture.get());
     ctx->destroy_image(camo_tex.get());
+    gun_model.destroy_textures();
     // destroy window, instance and device
     ctx->destroy();
 

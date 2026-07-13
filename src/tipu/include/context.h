@@ -91,6 +91,8 @@ public:
 
     void end_rendering() const;
 
+    void blit_to_swapchain(Image &image);
+
     void submit();
 
     // gets new window size
@@ -148,6 +150,11 @@ private:
                                  VkImageLayout new_layout,
                                  VkAccessFlags2 new_access,
                                  VkPipelineStageFlags2 new_stage);
+
+    static void blit_image(const VkCommandBuffer cmd,
+                           const Image &src,
+                           const Image &dst,
+                           const VkFilter filter);
 
     Config config_;
 

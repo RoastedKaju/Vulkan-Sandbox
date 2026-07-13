@@ -273,6 +273,8 @@ std::unique_ptr<Image> Context::create_texture(const TextureDesc &desc) const {
     };
     check(vkCreateImageView(device_, &view_create_info, nullptr, &image->view_));
 
+    // TODO: Register texture in bindless registry
+
     return image;
 }
 
@@ -801,7 +803,6 @@ void Context::acquire_command_buffer() {
 
 void Context::begin_rendering(const Attachment &attachment, const FrameBuffer &frame_buffer) const {
     const uint32_t frame_index = frame_data_.frame_index_;
-
     const auto cmd = frame_data_.command_buffers_[frame_index];
 
     check(vkResetCommandBuffer(cmd, 0));
@@ -813,7 +814,7 @@ void Context::begin_rendering(const Attachment &attachment, const FrameBuffer &f
     check(vkBeginCommandBuffer(cmd, &cmd_begin_info));
 
     // transition for depth image
-    if (attachment.has_depth()) {
+    if (attachment.has_depth() && frame_buffer.depth_image_) {
         transition_image(cmd, *frame_buffer.depth_image_, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
                          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                          VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT);
@@ -828,6 +829,17 @@ void Context::begin_rendering(const Attachment &attachment, const FrameBuffer &f
         }
     }
 
+    // derive render extent from the actual bound attachment
+    uint32_t render_width = window_size_.x;
+    uint32_t render_height = window_size_.y;
+    if (attachment.color_count() > 0 && frame_buffer.color_images_[0]) {
+        render_width = frame_buffer.color_images_[0]->width_;
+        render_height = frame_buffer.color_images_[0]->height_;
+    } else if (attachment.has_depth() && frame_buffer.depth_image_) {
+        render_width = frame_buffer.depth_image_->width_;
+        render_height = frame_buffer.depth_image_->height_;
+    }
+
     // rendering attachments
     std::array<VkRenderingAttachmentInfo, Attachment::kMaxColorAttachments> resolved_colors{};
     for (uint32_t i = 0; i < attachment.color_count(); ++i) {
@@ -836,17 +848,14 @@ void Context::begin_rendering(const Attachment &attachment, const FrameBuffer &f
     }
 
     VkRenderingAttachmentInfo resolved_depth = attachment.depth();
-    if (attachment.has_depth()) {
+    if (attachment.has_depth() && frame_buffer.depth_image_) {
         resolved_depth.imageView = frame_buffer.depth_image_->view_;
     }
 
     const VkRenderingInfo rendering_info{
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .renderArea{
-            .extent{
-                .width = static_cast<uint32_t>(window_size_.x),
-                .height = static_cast<uint32_t>(window_size_.y)
-            }
+            .extent{.width = render_width, .height = render_height}
         },
         .layerCount = 1,
         .colorAttachmentCount = attachment.color_count(),
@@ -856,21 +865,16 @@ void Context::begin_rendering(const Attachment &attachment, const FrameBuffer &f
 
     vkCmdBeginRendering(cmd, &rendering_info);
 
-    // default viewport/scissor — set every time we begin rendering so callers
-    // don't have to think about it unless they want to override
     const VkViewport viewport{
-        .width = static_cast<float>(window_size_.x),
-        .height = static_cast<float>(window_size_.y),
+        .width = static_cast<float>(render_width),
+        .height = static_cast<float>(render_height),
         .minDepth = 0.0f,
         .maxDepth = 1.0f
     };
     vkCmdSetViewport(cmd, 0, 1, &viewport);
 
     const VkRect2D scissor{
-        .extent{
-            .width = static_cast<uint32_t>(window_size_.x),
-            .height = static_cast<uint32_t>(window_size_.y)
-        }
+        .extent{.width = render_width, .height = render_height}
     };
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 }
@@ -927,6 +931,24 @@ void Context::end_rendering() const {
     const uint32_t frame_index = frame_data_.frame_index_;
     const auto cmd = frame_data_.command_buffers_[frame_index];
     vkCmdEndRendering(cmd);
+}
+
+void Context::blit_to_swapchain(Image &image) {
+    const uint32_t frame_index = frame_data_.frame_index_;
+    const VkCommandBuffer cmd = frame_data_.command_buffers_[frame_index];
+
+    Image &swap_image = *get_current_swap_chain_image();
+
+    transition_image(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                     VK_ACCESS_2_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_2_BLIT_BIT);
+
+    transition_image(cmd, swap_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                     VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_BLIT_BIT);
+
+    blit_image(cmd, image, swap_image, VK_FILTER_LINEAR);
+
+    transition_image(cmd, swap_image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                     VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT);
 }
 
 void Context::submit() {
@@ -1111,6 +1133,45 @@ void Context::transition_image(const VkCommandBuffer cmd,
     vkCmdPipelineBarrier2(cmd, &dep_info);
 
     image.state_ = ImageState{new_layout, new_access, new_stage};
+}
+
+void Context::blit_image(const VkCommandBuffer cmd, const Image &src, const Image &dst, const VkFilter filter) {
+    const VkImageBlit2 blit_region{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2,
+        .srcSubresource{
+            .aspectMask = src.aspect_,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = src.array_layers_,
+        },
+        .srcOffsets = {
+            {0, 0, 0},
+            {static_cast<int32_t>(src.width_), static_cast<int32_t>(src.height_), 1}
+        },
+        .dstSubresource{
+            .aspectMask = dst.aspect_,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = dst.array_layers_,
+        },
+        .dstOffsets = {
+            {0, 0, 0},
+            {static_cast<int32_t>(dst.width_), static_cast<int32_t>(dst.height_), 1}
+        },
+    };
+
+    const VkBlitImageInfo2 blit_info{
+        .sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2,
+        .srcImage = src.image_,
+        .srcImageLayout = src.state_.layout_,
+        .dstImage = dst.image_,
+        .dstImageLayout = dst.state_.layout_,
+        .regionCount = 1,
+        .pRegions = &blit_region,
+        .filter = filter,
+    };
+
+    vkCmdBlitImage2(cmd, &blit_info);
 }
 
 void Context::create_default_sampler() {

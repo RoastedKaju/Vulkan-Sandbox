@@ -4,8 +4,8 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int64: require
 
 layout (push_constant) uniform PushConstants {
-    uint64_t address;
     mat4 model;
+    uint64_t address;
     uint albedo;
     uint metallic;
     uint normal;
@@ -43,7 +43,7 @@ void main() {
     ShaderData sceneData = ShaderDataRef(address).data;
 
     // World-space position
-    vec4 worldPos = sceneData.model * vec4(inPosition, 1.0);
+    vec4 worldPos = model * vec4(inPosition, 1.0);
 
     // Normal calculation
     mat3 normalMatrix = transpose(inverse(mat3(model)));

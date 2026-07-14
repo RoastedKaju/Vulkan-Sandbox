@@ -19,8 +19,8 @@ struct ShaderData {
 };
 
 struct PushConstant {
-    VkDeviceAddress data_address;
-    uint32_t wireframe;
+    VkDeviceAddress data_address_;
+    uint32_t wireframe_;
 };
 
 int main(int argc, char *argv[]) {
@@ -224,7 +224,7 @@ int main(int argc, char *argv[]) {
 
                 // draw wireframe
                 ctx->bind_pipeline(wire_pipeline);
-                pc.wireframe = 1;
+                pc.wireframe_ = 1;
                 ctx->cmd_push_constants(pipeline_layout, &pc);
                 ctx->draw_indexed(gun_indices.size());
             }

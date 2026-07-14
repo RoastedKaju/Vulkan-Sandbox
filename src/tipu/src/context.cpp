@@ -225,7 +225,7 @@ SDL_Window *Context::create_window(const char *title, const uint32_t width, cons
     return window_;
 }
 
-std::unique_ptr<Image> Context::create_texture(const TextureDesc &desc) const {
+std::unique_ptr<Image> Context::create_texture(const TextureDesc &desc) {
     auto image = std::make_unique<Image>();
     image->width_ = desc.dimension_.x;
     image->height_ = desc.dimension_.y;
@@ -273,7 +273,13 @@ std::unique_ptr<Image> Context::create_texture(const TextureDesc &desc) const {
     };
     check(vkCreateImageView(device_, &view_create_info, nullptr, &image->view_));
 
-    // TODO: Register texture in bindless registry
+    // Register into bindless descriptor array, store resulting slot on the image
+    // Only register to bindless descriptor array if it can actually be sampled
+    if (image->usage_ & VK_IMAGE_USAGE_SAMPLED_BIT) {
+        image->bindless_index_ = descriptor_registry_.register_texture(image->view_, default_sampler_);
+    } else {
+        image->bindless_index_ = std::numeric_limits<uint32_t>::max(); // Or invalid sentinel
+    }
 
     return image;
 }
@@ -381,9 +387,6 @@ std::unique_ptr<Image> Context::load_texture(const std::filesystem::path &path, 
     vkDestroyFence(device_, fence_one_time, nullptr);
     vkFreeCommandBuffers(device_, command_pool_, 1, &cmd_buf_one_time);
     vmaDestroyBuffer(allocator_, data_buffer.get(), data_buffer.get_allocation());
-
-    // Register into bindless descriptor array, store resulting slot on the image
-    image->bindless_index_ = descriptor_registry_.register_texture(image->view_, default_sampler_);
 
     return image;
 }
@@ -799,12 +802,10 @@ void Context::acquire_command_buffer() {
         printf("Swap-chain check failed %d\n", acquire_next_image_result);
         exit(EXIT_FAILURE);
     }
-}
 
-void Context::begin_rendering(const Attachment &attachment, const FrameBuffer &frame_buffer) const {
-    const uint32_t frame_index = frame_data_.frame_index_;
+    // begin command buffer recording for the whole frame (moved from begin_rendering,
+    // which used to reset/begin on EVERY call, wiping out earlier passes in the same frame)
     const auto cmd = frame_data_.command_buffers_[frame_index];
-
     check(vkResetCommandBuffer(cmd, 0));
 
     constexpr VkCommandBufferBeginInfo cmd_begin_info{
@@ -812,6 +813,11 @@ void Context::begin_rendering(const Attachment &attachment, const FrameBuffer &f
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
     };
     check(vkBeginCommandBuffer(cmd, &cmd_begin_info));
+}
+
+void Context::begin_rendering(const Attachment &attachment, const FrameBuffer &frame_buffer) const {
+    const uint32_t frame_index = frame_data_.frame_index_;
+    const auto cmd = frame_data_.command_buffers_[frame_index];
 
     // transition for depth image
     if (attachment.has_depth() && frame_buffer.depth_image_) {
@@ -933,22 +939,11 @@ void Context::end_rendering() const {
     vkCmdEndRendering(cmd);
 }
 
-void Context::blit_to_swapchain(Image &image) {
+void Context::present(Image &image) const {
     const uint32_t frame_index = frame_data_.frame_index_;
-    const VkCommandBuffer cmd = frame_data_.command_buffers_[frame_index];
-
-    Image &swap_image = *get_current_swap_chain_image();
-
-    transition_image(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                     VK_ACCESS_2_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_2_BLIT_BIT);
-
-    transition_image(cmd, swap_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                     VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_BLIT_BIT);
-
-    blit_image(cmd, image, swap_image, VK_FILTER_LINEAR);
-
-    transition_image(cmd, swap_image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                     VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT);
+    const auto cmd = frame_data_.command_buffers_[frame_index];
+    transition_image(cmd, image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                     VK_ACCESS_2_SHADER_READ_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
 }
 
 void Context::submit() {

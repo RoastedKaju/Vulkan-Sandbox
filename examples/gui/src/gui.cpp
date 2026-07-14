@@ -171,7 +171,7 @@ int main(int argc, char *argv[]) {
                 ImGui::Spacing();
 
                 ImGui::ProgressBar(
-                    (sinf((float) ImGui::GetTime()) + 1.0f) * 0.5f,
+                    (sinf(static_cast<float>(ImGui::GetTime())) + 1.0f) * 0.5f,
                     ImVec2(-FLT_MIN, 0),
                     "GPU Workload");
 

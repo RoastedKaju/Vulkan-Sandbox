@@ -81,6 +81,7 @@ void SwapChain::recreate_swap_chain(Context *context) {
     context->update_window_size();
 
     check(vkDeviceWaitIdle(context->device_));
+
     VkSurfaceCapabilitiesKHR surface_capabilities{};
     check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(context->physical_device_,
                                                     context->surface_,

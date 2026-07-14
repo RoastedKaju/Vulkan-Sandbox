@@ -20,58 +20,58 @@ struct ShaderData {
 
 struct alignas(16) PushConstant {
     glm::mat4 model_;
-    VkDeviceAddress data_address;
+    VkDeviceAddress data_address_;
     uint32_t bindless_albedo_;
     uint32_t bindless_metallic_;
     uint32_t bindless_normal_;
 };
 
 struct Camera {
-    glm::vec3 position = glm::vec3(0.0f, 0.0f, 10.0f);
-    glm::vec3 front = glm::vec3(0.0f, 0.0f, -1.0f);
-    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
-    glm::vec3 worldUp = glm::vec3(0.0f, 1.0f, 0.0f);
-    glm::vec3 right = glm::vec3(1.0f, 0.0f, 0.0f);
+    glm::vec3 position_ = glm::vec3(0.0f, 0.0f, 10.0f);
+    glm::vec3 front_ = glm::vec3(0.0f, 0.0f, -1.0f);
+    glm::vec3 up_ = glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 world_up_ = glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 right_ = glm::vec3(1.0f, 0.0f, 0.0f);
 
-    float yaw = -90.0f; // facing -Z initially
-    float pitch = 0.0f;
+    float yaw_ = -90.0f; // facing -Z initially
+    float pitch_ = 0.0f;
 
-    float moveSpeed = 5.0f; // units per second
-    float mouseSens = 0.1f; // degrees per pixel
+    float speed_ = 5.0f; // units per second
+    float sen_ = 0.1f; // degrees per pixel
 
     void update() {
-        glm::vec3 newFront;
-        newFront.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
-        newFront.y = sin(glm::radians(pitch));
-        newFront.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
-        front = glm::normalize(newFront);
-        right = glm::normalize(glm::cross(front, worldUp));
-        up = glm::normalize(glm::cross(right, front));
+        glm::vec3 new_front;
+        new_front.x = cos(glm::radians(yaw_)) * cos(glm::radians(pitch_));
+        new_front.y = sin(glm::radians(pitch_));
+        new_front.z = sin(glm::radians(yaw_)) * cos(glm::radians(pitch_));
+        front_ = glm::normalize(new_front);
+        right_ = glm::normalize(glm::cross(front_, world_up_));
+        up_ = glm::normalize(glm::cross(right_, front_));
     }
 
-    void process_keyboard(const bool *keys, float dt) {
-        float velocity = moveSpeed * dt;
+    void process_keyboard(const bool *keys, const float dt) {
+        const float velocity = speed_ * dt;
 
-        if (keys[SDL_SCANCODE_W]) position += front * velocity;
-        if (keys[SDL_SCANCODE_S]) position -= front * velocity;
-        if (keys[SDL_SCANCODE_A]) position -= right * velocity;
-        if (keys[SDL_SCANCODE_D]) position += right * velocity;
-        if (keys[SDL_SCANCODE_SPACE]) position += worldUp * velocity;
-        if (keys[SDL_SCANCODE_LCTRL]) position -= worldUp * velocity;
+        if (keys[SDL_SCANCODE_W]) position_ += front_ * velocity;
+        if (keys[SDL_SCANCODE_S]) position_ -= front_ * velocity;
+        if (keys[SDL_SCANCODE_A]) position_ -= right_ * velocity;
+        if (keys[SDL_SCANCODE_D]) position_ += right_ * velocity;
+        if (keys[SDL_SCANCODE_SPACE]) position_ += world_up_ * velocity;
+        if (keys[SDL_SCANCODE_LCTRL]) position_ -= world_up_ * velocity;
     }
 
-    void process_mouse(float xrel, float yrel) {
-        yaw += xrel * mouseSens;
-        pitch -= yrel * mouseSens; // inverted so mouse-up looks up
+    void process_mouse(const float xrel, const float yrel) {
+        yaw_ += xrel * sen_;
+        pitch_ -= yrel * sen_; // inverted so mouse-up looks up
 
-        if (pitch > 89.0f) pitch = 89.0f;
-        if (pitch < -89.0f) pitch = -89.0f;
+        if (pitch_ > 89.0f) pitch_ = 89.0f;
+        if (pitch_ < -89.0f) pitch_ = -89.0f;
 
         update();
     }
 
-    glm::mat4 getViewMatrix() const {
-        return glm::lookAt(position, position + front, up);
+    glm::mat4 get_view_matrix() const {
+        return glm::lookAt(position_, position_ + front_, up_);
     }
 };
 
@@ -138,14 +138,14 @@ int main(int argc, char *argv[]) {
     };
     Buffer uniform_buffer{};
     uniform_buffer.create(u_buf_desc);
-    BufferDesc proc_u_buf_desc{
+    BufferDesc sky_u_buf_desc{
         .context = ctx.get(),
         .usage_flags = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
         .size = sizeof(ShaderData),
         .per_frame = true
     };
-    Buffer proc_uniform_buffer{};
-    proc_uniform_buffer.create(proc_u_buf_desc);
+    Buffer sky_uniform_buffer{};
+    sky_uniform_buffer.create(sky_u_buf_desc);
 
     // load shaders
     [[maybe_unused]] const VkShaderModule vert_shader = Shader::create_shader_module(ctx.get(),
@@ -154,10 +154,10 @@ int main(int argc, char *argv[]) {
     [[maybe_unused]] const VkShaderModule frag_shader = Shader::create_shader_module(ctx.get(),
         "assets/shaders/environment.frag.glsl",
         shaderc_fragment_shader);
-    [[maybe_unused]] const VkShaderModule proc_vert_shader = Shader::create_shader_module(ctx.get(),
+    [[maybe_unused]] const VkShaderModule sky_vert_shader = Shader::create_shader_module(ctx.get(),
         "assets/shaders/skybox.vert.glsl",
         shaderc_vertex_shader);
-    [[maybe_unused]] const VkShaderModule proc_frag_shader = Shader::create_shader_module(ctx.get(),
+    [[maybe_unused]] const VkShaderModule sky_frag_shader = Shader::create_shader_module(ctx.get(),
         "assets/shaders/skybox.frag.glsl",
         shaderc_fragment_shader);
 
@@ -207,20 +207,20 @@ int main(int argc, char *argv[]) {
                                                  depth_texture->format_);
 
     // create skybox pipeline
-    PipelineBuilder proc_pipeline_builder{};
-    proc_pipeline_builder.add_shader(VK_SHADER_STAGE_VERTEX_BIT, proc_vert_shader);
-    proc_pipeline_builder.add_shader(VK_SHADER_STAGE_FRAGMENT_BIT, proc_frag_shader);
-    proc_pipeline_builder.set_vertex_layout({}, {});
-    proc_pipeline_builder.set_input_assembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-    proc_pipeline_builder.set_viewport(1, 1, true);
-    proc_pipeline_builder.set_rasterization(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
-    proc_pipeline_builder.set_multisampling(VK_SAMPLE_COUNT_1_BIT);
-    proc_pipeline_builder.set_depth_stencil(true, false, VK_COMPARE_OP_LESS_OR_EQUAL);
-    proc_pipeline_builder.set_color_blend(1, 0xF);
-    VkPipeline proc_pipeline = proc_pipeline_builder.build(ctx.get(),
-                                                           pipeline_layout,
-                                                           {ctx->get_swap_chain().get_format()},
-                                                           depth_texture->format_);
+    PipelineBuilder sky_pipeline_builder{};
+    sky_pipeline_builder.add_shader(VK_SHADER_STAGE_VERTEX_BIT, sky_vert_shader);
+    sky_pipeline_builder.add_shader(VK_SHADER_STAGE_FRAGMENT_BIT, sky_frag_shader);
+    sky_pipeline_builder.set_vertex_layout({}, {});
+    sky_pipeline_builder.set_input_assembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    sky_pipeline_builder.set_viewport(1, 1, true);
+    sky_pipeline_builder.set_rasterization(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
+    sky_pipeline_builder.set_multisampling(VK_SAMPLE_COUNT_1_BIT);
+    sky_pipeline_builder.set_depth_stencil(true, false, VK_COMPARE_OP_LESS_OR_EQUAL);
+    sky_pipeline_builder.set_color_blend(1, 0xF);
+    VkPipeline sky_pipeline = sky_pipeline_builder.build(ctx.get(),
+                                                         pipeline_layout,
+                                                         {ctx->get_swap_chain().get_format()},
+                                                         depth_texture->format_);
 
     // loop setup
     Uint64 last_time = SDL_GetPerformanceCounter();
@@ -228,7 +228,7 @@ int main(int argc, char *argv[]) {
 
     // camera
     Camera camera{};
-    camera.position = glm::vec3(0.0f, 0.0f, 10.0f);
+    camera.position_ = glm::vec3(0.0f, 0.0f, 10.0f);
     camera.update();
 
     // super loop
@@ -262,8 +262,8 @@ int main(int argc, char *argv[]) {
 
         shader_data.projection_[1][1] *= -1.0f; // flip Y
 
-        shader_data.view_ = camera.getViewMatrix();
-        shader_data.camera_ = camera.position;
+        shader_data.view_ = camera.get_view_matrix();
+        shader_data.camera_ = camera.position_;
 
         [[maybe_unused]] auto time = SDL_GetTicks() / 1000.0f;
 
@@ -278,11 +278,11 @@ int main(int argc, char *argv[]) {
             uniform_buffer.update(&shader_data);
 
             // skybox
-            ShaderData proc_shader_data{};
-            proc_shader_data.projection_ = shader_data.projection_;
-            proc_shader_data.view_ = shader_data.view_;
-            proc_shader_data.bindless_cube_ = sky_tex->bindless_index_;
-            proc_uniform_buffer.update(&proc_shader_data);
+            ShaderData sky_shader_data{};
+            sky_shader_data.projection_ = shader_data.projection_;
+            sky_shader_data.view_ = shader_data.view_;
+            sky_shader_data.bindless_cube_ = sky_tex->bindless_index_;
+            sky_uniform_buffer.update(&sky_shader_data);
 
             // attachments
             Attachment scene_pass{};
@@ -304,18 +304,18 @@ int main(int argc, char *argv[]) {
 
             ctx->begin_rendering(scene_pass, frame_buffer);
             {
-                // draw procedural box
-                ctx->bind_pipeline(proc_pipeline);
+                // skybox
+                ctx->bind_pipeline(sky_pipeline);
                 ctx->bind_descriptor_set(pipeline_layout, ctx->get_texture_registry().get_set());
-                PushConstant proc_pc{.data_address = proc_uniform_buffer.address()};
-                ctx->cmd_push_constants(pipeline_layout, &proc_pc);
+                PushConstant sky_pc{.data_address_ = sky_uniform_buffer.address()};
+                ctx->cmd_push_constants(pipeline_layout, &sky_pc);
                 ctx->draw(36);
 
                 // model
                 ctx->bind_pipeline(pipeline);
                 ctx->bind_vertex_buffer(vertex_buffer.get());
                 ctx->bind_index_buffer(index_buffer.get());
-                PushConstant pc{.data_address = uniform_buffer.address()};
+                PushConstant pc{.data_address_ = uniform_buffer.address()};
                 pc.model_ = transform;
                 pc.bindless_albedo_ = camo_tex->bindless_index_;
                 ctx->cmd_push_constants(pipeline_layout, &pc);
@@ -340,14 +340,14 @@ int main(int argc, char *argv[]) {
     vertex_buffer.destroy();
     index_buffer.destroy();
     uniform_buffer.destroy();
-    proc_uniform_buffer.destroy();
+    sky_uniform_buffer.destroy();
     ctx->destroy_pipeline_layout(pipeline_layout);
     ctx->destroy_pipeline(pipeline);
-    ctx->destroy_pipeline(proc_pipeline);
+    ctx->destroy_pipeline(sky_pipeline);
     ctx->destory_shader(vert_shader);
     ctx->destory_shader(frag_shader);
-    ctx->destory_shader(proc_vert_shader);
-    ctx->destory_shader(proc_frag_shader);
+    ctx->destory_shader(sky_vert_shader);
+    ctx->destory_shader(sky_frag_shader);
     ctx->destroy_image(depth_texture.get());
     ctx->destroy_image(camo_tex.get());
     ctx->destroy_image(sky_tex.get());

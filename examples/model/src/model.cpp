@@ -19,7 +19,7 @@ struct ShaderData {
 };
 
 struct PushConstant {
-    VkDeviceAddress data_address;
+    VkDeviceAddress data_address_;
 };
 
 int main(int argc, char *argv[]) {
@@ -199,7 +199,7 @@ int main(int argc, char *argv[]) {
                 ctx->bind_descriptor_set(pipeline_layout, ctx->get_texture_registry().get_set());
                 ctx->bind_vertex_buffer(vertex_buffer.get());
                 ctx->bind_index_buffer(index_buffer.get());
-                PushConstant pc{.data_address = uniform_buffer.address()};
+                PushConstant pc{.data_address_ = uniform_buffer.address()};
                 ctx->cmd_push_constants(pipeline_layout, &pc);
                 ctx->draw_indexed(tank_indices.size());
             }

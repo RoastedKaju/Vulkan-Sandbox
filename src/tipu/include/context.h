@@ -56,7 +56,7 @@ public:
 
     SDL_Window *create_window(const char *title, uint32_t width, uint32_t height);
 
-    std::unique_ptr<Image> create_texture(const TextureDesc &desc) const;
+    std::unique_ptr<Image> create_texture(const TextureDesc &desc);
 
     std::unique_ptr<Image> load_texture(const std::filesystem::path &path, VkFormat format = VK_FORMAT_R8G8B8A8_UNORM);
 
@@ -91,7 +91,7 @@ public:
 
     void end_rendering() const;
 
-    void blit_to_swapchain(Image &image);
+    void present(Image &image) const;
 
     void submit();
 

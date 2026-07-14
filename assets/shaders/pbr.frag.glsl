@@ -101,7 +101,7 @@ void main()
 
     float NdotL = max(dot(N, L), 0.0);
 
-    vec3 radiance = vec3(1.0);
+    vec3 radiance = vec3(12.0);
 
     vec3 Lo = (kD * albedo / 3.14159265 + specular) * radiance * NdotL;
 
@@ -109,12 +109,6 @@ void main()
     vec3 ambient = vec3(0.0065) * albedo;
 
     vec3 color = ambient + Lo;
-
-    // Reinhard tone mapping
-    color = color / (color + vec3(1.0));
-
-    // Gamma correction
-    color = pow(color, vec3(1.0 / 2.2));
 
     outColor = vec4(color, 1.0);
 }

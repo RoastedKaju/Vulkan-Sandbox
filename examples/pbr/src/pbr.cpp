@@ -26,6 +26,10 @@ struct alignas(16) PushConstant {
     uint32_t bindless_normal_;
 };
 
+struct PresentPushConstant {
+    uint32_t color_;
+};
+
 struct Camera {
     glm::vec3 position_ = glm::vec3(0.0f, 0.0f, 10.0f);
     glm::vec3 front_ = glm::vec3(0.0f, 0.0f, -1.0f);
@@ -94,13 +98,7 @@ int main(int argc, char *argv[]) {
     const auto gun_indices = gun_model.meshes().at(0).data().indices_;
 
 
-    // load textures
-    std::unique_ptr<Image> albedo_tex = ctx->load_texture("assets/textures/gun/color.png",
-                                                          VK_FORMAT_R8G8B8A8_SRGB);
-    std::unique_ptr<Image> metallic_tex = ctx->load_texture("assets/textures/gun/metallic.png",
-                                                            VK_FORMAT_R8G8B8A8_UNORM);
-    std::unique_ptr<Image> normal_tex = ctx->load_texture("assets/textures/gun/normal.png",
-                                                          VK_FORMAT_R8G8B8A8_UNORM);
+    // load skybox textures
     std::unique_ptr<Image> sky_tex = ctx->load_cubemap(
         {
             "assets/textures/farm/right.png",
@@ -160,12 +158,32 @@ int main(int argc, char *argv[]) {
     [[maybe_unused]] const VkShaderModule frag_shader = Shader::create_shader_module(ctx.get(),
         "assets/shaders/pbr.frag.glsl",
         shaderc_fragment_shader);
-    [[maybe_unused]] const VkShaderModule proc_vert_shader = Shader::create_shader_module(ctx.get(),
+    [[maybe_unused]] const VkShaderModule sky_vert_shader = Shader::create_shader_module(ctx.get(),
         "assets/shaders/skybox.vert.glsl",
         shaderc_vertex_shader);
-    [[maybe_unused]] const VkShaderModule proc_frag_shader = Shader::create_shader_module(ctx.get(),
+    [[maybe_unused]] const VkShaderModule sky_frag_shader = Shader::create_shader_module(ctx.get(),
         "assets/shaders/skybox.frag.glsl",
         shaderc_fragment_shader);
+    const VkShaderModule present_vert = Shader::create_shader_module(ctx.get(),
+                                                                     "assets/shaders/present.vert.glsl",
+                                                                     shaderc_vertex_shader);
+    const VkShaderModule present_frag = Shader::create_shader_module(ctx.get(),
+                                                                     "assets/shaders/present.frag.glsl",
+                                                                     shaderc_fragment_shader);
+
+    // off-screen render target
+    TextureDesc color_tex_desc{};
+    color_tex_desc.dimension_ = {kWidth, kHeight};
+    color_tex_desc.mip_levels_ = 1;
+    color_tex_desc.array_layers_ = 1;
+    color_tex_desc.aspect_ = VK_IMAGE_ASPECT_COLOR_BIT;
+    color_tex_desc.format_ = VK_FORMAT_R16G16B16A16_SFLOAT;
+    color_tex_desc.tiling_ = VK_IMAGE_TILING_OPTIMAL;
+    color_tex_desc.usage_ = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                            VK_IMAGE_USAGE_SAMPLED_BIT |
+                            VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    color_tex_desc.prefer_dedicated_alloc_ = true;
+    auto offscreen_color = ctx->create_texture(color_tex_desc);
 
     // create depth texture
     TextureDesc depth_tex_desc{};
@@ -210,24 +228,43 @@ int main(int argc, char *argv[]) {
     pipeline_builder.set_color_blend(1, 0xF);
     VkPipeline pipeline = pipeline_builder.build(ctx.get(),
                                                  pipeline_layout,
-                                                 {ctx->get_swap_chain().get_format()},
+                                                 {offscreen_color->format_},
                                                  depth_texture->format_);
 
     // create skybox pipeline
-    PipelineBuilder proc_pipeline_builder{};
-    proc_pipeline_builder.add_shader(VK_SHADER_STAGE_VERTEX_BIT, proc_vert_shader);
-    proc_pipeline_builder.add_shader(VK_SHADER_STAGE_FRAGMENT_BIT, proc_frag_shader);
-    proc_pipeline_builder.set_vertex_layout({}, {});
-    proc_pipeline_builder.set_input_assembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-    proc_pipeline_builder.set_viewport(1, 1, true);
-    proc_pipeline_builder.set_rasterization(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
-    proc_pipeline_builder.set_multisampling(VK_SAMPLE_COUNT_1_BIT);
-    proc_pipeline_builder.set_depth_stencil(true, false, VK_COMPARE_OP_LESS_OR_EQUAL);
-    proc_pipeline_builder.set_color_blend(1, 0xF);
-    VkPipeline proc_pipeline = proc_pipeline_builder.build(ctx.get(),
-                                                           pipeline_layout,
-                                                           {ctx->get_swap_chain().get_format()},
-                                                           depth_texture->format_);
+    PipelineBuilder sky_pipeline_builder{};
+    sky_pipeline_builder.add_shader(VK_SHADER_STAGE_VERTEX_BIT, sky_vert_shader);
+    sky_pipeline_builder.add_shader(VK_SHADER_STAGE_FRAGMENT_BIT, sky_frag_shader);
+    sky_pipeline_builder.set_vertex_layout({}, {});
+    sky_pipeline_builder.set_input_assembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    sky_pipeline_builder.set_viewport(1, 1, true);
+    sky_pipeline_builder.set_rasterization(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
+    sky_pipeline_builder.set_multisampling(VK_SAMPLE_COUNT_1_BIT);
+    sky_pipeline_builder.set_depth_stencil(true, false, VK_COMPARE_OP_LESS_OR_EQUAL);
+    sky_pipeline_builder.set_color_blend(1, 0xF);
+    VkPipeline sky_pipeline = sky_pipeline_builder.build(ctx.get(),
+                                                         pipeline_layout,
+                                                         {offscreen_color->format_},
+                                                         depth_texture->format_);
+
+    // present pipeline
+    PipelineLayoutBuilder present_layout_desc{};
+    present_layout_desc.add_descriptor_set_layout(ctx->get_texture_registry().get_layout());
+    present_layout_desc.add_push_constant(VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(PresentPushConstant));
+    const PipelineLayout present_pipeline_layout = present_layout_desc.build(ctx.get());
+
+    PipelineBuilder present_pipeline_builder{};
+    present_pipeline_builder.add_shader(VK_SHADER_STAGE_VERTEX_BIT, present_vert);
+    present_pipeline_builder.add_shader(VK_SHADER_STAGE_FRAGMENT_BIT, present_frag);
+    present_pipeline_builder.set_input_assembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    present_pipeline_builder.set_viewport(1, 1, true);
+    present_pipeline_builder.set_rasterization(VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    present_pipeline_builder.set_multisampling(VK_SAMPLE_COUNT_1_BIT);
+    present_pipeline_builder.set_color_blend(1, 0xF);
+    const VkPipeline present_pipeline = present_pipeline_builder.build(ctx.get(),
+                                                                       present_pipeline_layout,
+                                                                       {ctx->get_swap_chain().get_format()},
+                                                                       VK_FORMAT_UNDEFINED);
 
     // loop setup
     Uint64 last_time = SDL_GetPerformanceCounter();
@@ -276,7 +313,6 @@ int main(int argc, char *argv[]) {
 
         ctx->acquire_command_buffer();
         {
-            // gun draw
             auto transform = glm::mat4(1.0f);
             transform = glm::translate(transform, glm::vec3(0.0f, 0.0f, 0.0f));
             transform = glm::rotate(transform, glm::radians(45.0f * (time * 0.05f)), glm::vec3(0.0f, 1.0f, 0.0f));
@@ -285,14 +321,13 @@ int main(int argc, char *argv[]) {
             shader_data.bindless_cube_ = sky_tex->bindless_index_;
             uniform_buffer.update(&shader_data);
 
-            // proc draw
-            ShaderData proc_shader_data{};
-            proc_shader_data.projection_ = shader_data.projection_;
-            proc_shader_data.view_ = shader_data.view_;
-            proc_shader_data.bindless_cube_ = sky_tex->bindless_index_;
-            proc_uniform_buffer.update(&proc_shader_data);
+            ShaderData sky_shader_data{};
+            sky_shader_data.projection_ = shader_data.projection_;
+            sky_shader_data.view_ = shader_data.view_;
+            sky_shader_data.bindless_cube_ = sky_tex->bindless_index_;
+            proc_uniform_buffer.update(&sky_shader_data);
 
-            // attachments
+            // 1st Pass
             Attachment scene_pass{};
             scene_pass.add_color(
                 VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
@@ -308,12 +343,12 @@ int main(int argc, char *argv[]) {
 
             FrameBuffer frame_buffer{};
             frame_buffer.depth_image_ = depth_texture.get();
-            frame_buffer.color_images_[0] = ctx->get_current_swap_chain_image();
+            frame_buffer.color_images_[0] = offscreen_color.get();
 
             ctx->begin_rendering(scene_pass, frame_buffer);
             {
                 // draw procedural box
-                ctx->bind_pipeline(proc_pipeline);
+                ctx->bind_pipeline(sky_pipeline);
                 ctx->bind_descriptor_set(pipeline_layout, ctx->get_texture_registry().get_set());
                 PushConstant proc_pc{.data_address_ = proc_uniform_buffer.address()};
                 ctx->cmd_push_constants(pipeline_layout, &proc_pc);
@@ -324,12 +359,36 @@ int main(int argc, char *argv[]) {
                 ctx->bind_vertex_buffer(vertex_buffer.get());
                 ctx->bind_index_buffer(index_buffer.get());
                 PushConstant pc{.data_address_ = uniform_buffer.address()};
+                const auto &material = gun_model.meshes().at(0).material();
                 pc.model_ = transform;
-                pc.bindless_albedo_ = albedo_tex->bindless_index_;
-                pc.bindless_metallic_ = metallic_tex->bindless_index_;
-                pc.bindless_normal_ = normal_tex->bindless_index_;
+                pc.bindless_albedo_ = material->base_color_->image_->bindless_index_;
+                pc.bindless_metallic_ = material->metallic_roughness_->image_->bindless_index_;
+                pc.bindless_normal_ = material->normal_->image_->bindless_index_;
                 ctx->cmd_push_constants(pipeline_layout, &pc);
                 ctx->draw_indexed(gun_indices.size());
+            }
+            ctx->end_rendering();
+
+            ctx->present(*offscreen_color.get());
+
+            // 2nd Pass
+            Attachment present_pass{};
+            present_pass.add_color(
+                VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                VK_ATTACHMENT_STORE_OP_STORE,
+                {0.0f, 0.0f, 0.0f, 1.0f});
+
+            FrameBuffer present_frame_buffer{};
+            present_frame_buffer.color_images_[0] = ctx->get_current_swap_chain_image();
+
+            ctx->begin_rendering(present_pass, present_frame_buffer);
+            {
+                ctx->bind_pipeline(present_pipeline);
+                ctx->bind_descriptor_set(present_pipeline_layout, ctx->get_texture_registry().get_set());
+                PresentPushConstant pc{.color_ = offscreen_color->bindless_index_};
+                ctx->cmd_push_constants(present_pipeline_layout, &pc);
+                ctx->draw(3);
             }
             ctx->end_rendering();
         }
@@ -341,6 +400,10 @@ int main(int argc, char *argv[]) {
             ctx->destroy_image(depth_texture.get());
             depth_tex_desc.dimension_ = ctx->get_window_size();
             depth_texture = ctx->create_texture(depth_tex_desc);
+            // recreate color texture
+            ctx->destroy_image(offscreen_color.get());
+            color_tex_desc.dimension_ = ctx->get_window_size();
+            offscreen_color = ctx->create_texture(color_tex_desc);
         }
     }
 
@@ -353,15 +416,17 @@ int main(int argc, char *argv[]) {
     proc_uniform_buffer.destroy();
     ctx->destroy_pipeline_layout(pipeline_layout);
     ctx->destroy_pipeline(pipeline);
-    ctx->destroy_pipeline(proc_pipeline);
+    ctx->destroy_pipeline(sky_pipeline);
+    ctx->destroy_pipeline_layout(present_pipeline_layout);
+    ctx->destroy_pipeline(present_pipeline);
     ctx->destory_shader(vert_shader);
     ctx->destory_shader(frag_shader);
-    ctx->destory_shader(proc_vert_shader);
-    ctx->destory_shader(proc_frag_shader);
+    ctx->destory_shader(sky_vert_shader);
+    ctx->destory_shader(sky_frag_shader);
+    ctx->destory_shader(present_vert);
+    ctx->destory_shader(present_frag);
     ctx->destroy_image(depth_texture.get());
-    ctx->destroy_image(albedo_tex.get());
-    ctx->destroy_image(metallic_tex.get());
-    ctx->destroy_image(normal_tex.get());
+    ctx->destroy_image(offscreen_color.get());
     ctx->destroy_image(sky_tex.get());
     gun_model.destroy_textures();
     // destroy window, instance and device

@@ -10,6 +10,7 @@
 
 constexpr uint32_t kWidth = 1280u;
 constexpr uint32_t kHeight = 720u;
+constexpr VkSampleCountFlagBits kMsaaSamples = VK_SAMPLE_COUNT_4_BIT;
 
 struct ShaderData {
     glm::mat4 projection_;
@@ -185,6 +186,12 @@ int main(int argc, char *argv[]) {
     color_tex_desc.prefer_dedicated_alloc_ = true;
     auto offscreen_color = ctx->create_texture(color_tex_desc);
 
+    // MSAA
+    TextureDesc msaa_color_desc = color_tex_desc;
+    msaa_color_desc.usage_ = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
+    msaa_color_desc.samples_ = kMsaaSamples;
+    auto msaa_color = ctx->create_texture(msaa_color_desc);
+
     // create depth texture
     TextureDesc depth_tex_desc{};
     depth_tex_desc.dimension_ = {kWidth, kHeight};
@@ -196,6 +203,7 @@ int main(int argc, char *argv[]) {
     depth_tex_desc.tiling_ = VK_IMAGE_TILING_OPTIMAL;
     depth_tex_desc.usage_ = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
     depth_tex_desc.prefer_dedicated_alloc_ = true;
+    depth_tex_desc.samples_ = kMsaaSamples;
     auto depth_texture = ctx->create_texture(depth_tex_desc);
 
     // create pipeline layout
@@ -223,7 +231,7 @@ int main(int argc, char *argv[]) {
     pipeline_builder.set_input_assembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
     pipeline_builder.set_viewport(1, 1, true);
     pipeline_builder.set_rasterization(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE);
-    pipeline_builder.set_multisampling(VK_SAMPLE_COUNT_1_BIT);
+    pipeline_builder.set_multisampling(kMsaaSamples);
     pipeline_builder.set_depth_stencil(true, true, VK_COMPARE_OP_LESS_OR_EQUAL);
     pipeline_builder.set_color_blend(1, 0xF);
     VkPipeline pipeline = pipeline_builder.build(ctx.get(),
@@ -239,7 +247,7 @@ int main(int argc, char *argv[]) {
     sky_pipeline_builder.set_input_assembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
     sky_pipeline_builder.set_viewport(1, 1, true);
     sky_pipeline_builder.set_rasterization(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
-    sky_pipeline_builder.set_multisampling(VK_SAMPLE_COUNT_1_BIT);
+    sky_pipeline_builder.set_multisampling(kMsaaSamples);
     sky_pipeline_builder.set_depth_stencil(true, false, VK_COMPARE_OP_LESS_OR_EQUAL);
     sky_pipeline_builder.set_color_blend(1, 0xF);
     VkPipeline sky_pipeline = sky_pipeline_builder.build(ctx.get(),
@@ -332,8 +340,10 @@ int main(int argc, char *argv[]) {
             scene_pass.add_color(
                 VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
                 VK_ATTACHMENT_LOAD_OP_CLEAR,
-                VK_ATTACHMENT_STORE_OP_STORE,
-                {0.0f, 0.0f, 0.0f, 1.0f}
+                VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                {0.0f, 0.0f, 0.0f, 1.0f},
+                VK_RESOLVE_MODE_AVERAGE_BIT,
+                VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL
             );
             scene_pass.set_depth(
                 VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
@@ -343,7 +353,8 @@ int main(int argc, char *argv[]) {
 
             FrameBuffer frame_buffer{};
             frame_buffer.depth_image_ = depth_texture.get();
-            frame_buffer.color_images_[0] = offscreen_color.get();
+            frame_buffer.color_images_[0] = msaa_color.get();
+            frame_buffer.resolve_images_[0] = offscreen_color.get();
 
             ctx->begin_rendering(scene_pass, frame_buffer);
             {
@@ -404,6 +415,10 @@ int main(int argc, char *argv[]) {
             ctx->destroy_image(offscreen_color.get());
             color_tex_desc.dimension_ = ctx->get_window_size();
             offscreen_color = ctx->create_texture(color_tex_desc);
+            // recreate msaa texture
+            ctx->destroy_image(msaa_color.get());
+            msaa_color_desc.dimension_ = ctx->get_window_size();
+            msaa_color = ctx->create_texture(msaa_color_desc);
         }
     }
 
@@ -428,6 +443,7 @@ int main(int argc, char *argv[]) {
     ctx->destroy_image(depth_texture.get());
     ctx->destroy_image(offscreen_color.get());
     ctx->destroy_image(sky_tex.get());
+    ctx->destroy_image(msaa_color.get());
     gun_model.destroy_textures();
     // destroy window, instance and device
     ctx->destroy();

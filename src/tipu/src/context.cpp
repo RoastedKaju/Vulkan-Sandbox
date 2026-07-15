@@ -202,9 +202,6 @@ bool Context::setup_device(const uint32_t device_index) {
     };
     check(vmaCreateAllocator(&allocator_create_info, &allocator_));
 
-    // MSAA samples
-    msaa_samples_ = get_max_usable_sample_count();
-
     return true;
 }
 
@@ -394,7 +391,7 @@ std::unique_ptr<Image> Context::load_texture(const std::filesystem::path &path, 
 std::unique_ptr<Image> Context::load_texture_memory(const unsigned char *buffer_data,
                                                     const uint32_t width,
                                                     const uint32_t height,
-                                                    VkFormat format) {
+                                                    const VkFormat format) {
     int w = 0;
     int h = 0;
     int channels = 0;
@@ -819,23 +816,26 @@ void Context::begin_rendering(const Attachment &attachment, const FrameBuffer &f
     const uint32_t frame_index = frame_data_.frame_index_;
     const auto cmd = frame_data_.command_buffers_[frame_index];
 
-    // transition for depth image
     if (attachment.has_depth() && frame_buffer.depth_image_) {
         transition_image(cmd, *frame_buffer.depth_image_, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
                          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                          VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT);
     }
 
-    // transition for color attachments
     for (uint32_t i = 0; i < attachment.color_count(); ++i) {
         if (frame_buffer.color_images_[i]) {
             transition_image(cmd, *frame_buffer.color_images_[i], VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
                              VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
                              VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
         }
+
+        if (attachment.get_color_resolve_mode(i) != VK_RESOLVE_MODE_NONE && frame_buffer.resolve_images_[i]) {
+            transition_image(cmd, *frame_buffer.resolve_images_[i], attachment.get_color_resolve_layout(i),
+                             VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+        }
     }
 
-    // derive render extent from the actual bound attachment
     uint32_t render_width = window_size_.x;
     uint32_t render_height = window_size_.y;
     if (attachment.color_count() > 0 && frame_buffer.color_images_[0]) {
@@ -846,11 +846,16 @@ void Context::begin_rendering(const Attachment &attachment, const FrameBuffer &f
         render_height = frame_buffer.depth_image_->height_;
     }
 
-    // rendering attachments
     std::array<VkRenderingAttachmentInfo, Attachment::kMaxColorAttachments> resolved_colors{};
     for (uint32_t i = 0; i < attachment.color_count(); ++i) {
         resolved_colors[i] = attachment.color(i);
         resolved_colors[i].imageView = frame_buffer.color_images_[i]->view_;
+
+        // Assign resolve targets dynamically if MSAA is enabled for this attachment
+        if (attachment.get_color_resolve_mode(i) != VK_RESOLVE_MODE_NONE) {
+            assert(frame_buffer.resolve_images_[i] != nullptr && "Resolve image was not provided in FrameBuffer!");
+            resolved_colors[i].resolveImageView = frame_buffer.resolve_images_[i]->view_;
+        }
     }
 
     VkRenderingAttachmentInfo resolved_depth = attachment.depth();
@@ -872,6 +877,8 @@ void Context::begin_rendering(const Attachment &attachment, const FrameBuffer &f
     vkCmdBeginRendering(cmd, &rendering_info);
 
     const VkViewport viewport{
+        .x = 0.0f,
+        .y = 0.0f,
         .width = static_cast<float>(render_width),
         .height = static_cast<float>(render_height),
         .minDepth = 0.0f,
@@ -880,6 +887,7 @@ void Context::begin_rendering(const Attachment &attachment, const FrameBuffer &f
     vkCmdSetViewport(cmd, 0, 1, &viewport);
 
     const VkRect2D scissor{
+        .offset = {0, 0},
         .extent{.width = render_width, .height = render_height}
     };
     vkCmdSetScissor(cmd, 0, 1, &scissor);

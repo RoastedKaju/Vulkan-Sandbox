@@ -191,7 +191,6 @@ private:
     FrameData frame_data_;
 
     VkSampler default_sampler_{VK_NULL_HANDLE};
-    VkSampleCountFlagBits msaa_samples_{VK_SAMPLE_COUNT_1_BIT};
 
     friend class SwapChain;
     friend class Buffer;

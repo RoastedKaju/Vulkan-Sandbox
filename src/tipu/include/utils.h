@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <assimp/Importer.hpp>
 
 #include "context.h"
 
@@ -46,4 +47,21 @@ inline std::string read_text_file(const std::filesystem::path &path) {
     stream.read(result.data(), length);
 
     return result;
+}
+
+inline glm::mat4 convert(const aiMatrix4x4 &from) {
+    glm::mat4 to;
+    to[0][0] = from.a1; to[1][0] = from.a2; to[2][0] = from.a3; to[3][0] = from.a4;
+    to[0][1] = from.b1; to[1][1] = from.b2; to[2][1] = from.b3; to[3][1] = from.b4;
+    to[0][2] = from.c1; to[1][2] = from.c2; to[2][2] = from.c3; to[3][2] = from.c4;
+    to[0][3] = from.d1; to[1][3] = from.d2; to[2][3] = from.d3; to[3][3] = from.d4;
+    return to;
+}
+
+inline glm::vec3 convert(const aiVector3D &v) {
+    return {v.x, v.y, v.z};
+}
+
+inline glm::quat convert(const aiQuaternion &q) {
+    return {q.w, q.x, q.y, q.z}; // glm::quat ctor is (w, x, y, z)
 }

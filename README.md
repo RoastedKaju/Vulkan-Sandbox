@@ -37,7 +37,7 @@ You can load and display models in less than 200 lines of code with this, chain 
 ## Examples
 
 <p align="center">
-<b>Skybox</b>
+<b>Cubemap</b>
 </p>
 <p align="center">
 <img src="docs/CubemapExample.jpg" alt="Neon Tunnel"/>

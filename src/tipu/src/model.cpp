@@ -13,8 +13,9 @@
 #include "importer.h"
 #include "context.h"
 
-bool Model::load(Context *context, const std::filesystem::path &path) {
+bool Model::load(Context *context, const std::filesystem::path &path, const bool is_skeletal_mesh) {
     context_ = context;
+    is_skeletal_mesh_ = is_skeletal_mesh;
     Assimp::Importer importer;
 
     const aiScene *scene = importer.ReadFile(
@@ -24,7 +25,8 @@ bool Model::load(Context *context, const std::filesystem::path &path) {
         aiProcess_CalcTangentSpace |
         aiProcess_FlipUVs |
         aiProcess_JoinIdenticalVertices |
-        aiProcess_ImproveCacheLocality
+        aiProcess_ImproveCacheLocality |
+        aiProcess_LimitBoneWeights
     );
 
     if (!scene || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) || !scene->mRootNode) {
@@ -45,6 +47,40 @@ bool Model::load(Context *context, const std::filesystem::path &path) {
     }
 
     process_node(scene->mRootNode, scene);
+
+    // process skeletal mesh
+    if (is_skeletal_mesh_) {
+        skeleton_.root_ = process_skeleton_node(scene->mRootNode, -1);
+        skeleton_.global_inverse_transform_ = glm::inverse(convert(scene->mRootNode->mTransformation));
+
+        // extract animations
+        animations_.reserve(scene->mNumAnimations);
+        for (unsigned a = 0; a < scene->mNumAnimations; ++a) {
+            const aiAnimation *anim = scene->mAnimations[a];
+            AnimationClip clip;
+            clip.name_ = anim->mName.C_Str();
+            clip.duration_ = anim->mDuration;
+            clip.ticks_per_second_ = anim->mTicksPerSecond != 0.0 ? anim->mTicksPerSecond : 25.0;
+
+            for (unsigned c = 0; c < anim->mNumChannels; ++c) {
+                const aiNodeAnim *ch = anim->mChannels[c];
+                NodeAnimation na;
+                for (unsigned k = 0; k < ch->mNumPositionKeys; ++k)
+                    na.positions_.push_back(KeyPosition{
+                        ch->mPositionKeys[k].mTime, convert(ch->mPositionKeys[k].mValue)
+                    });
+                for (unsigned k = 0; k < ch->mNumRotationKeys; ++k)
+                    na.rotations_.push_back(KeyRotation{
+                        ch->mRotationKeys[k].mTime, convert(ch->mRotationKeys[k].mValue)
+                    });
+                for (unsigned k = 0; k < ch->mNumScalingKeys; ++k)
+                    na.scales_.push_back(KeyScale{ch->mScalingKeys[k].mTime, convert(ch->mScalingKeys[k].mValue)});
+                clip.channels_.emplace(ch->mNodeName.C_Str(), std::move(na));
+            }
+            animations_.push_back(std::move(clip));
+        }
+    }
+
     return true;
 }
 
@@ -124,6 +160,42 @@ Mesh Model::process_mesh(const aiMesh *mesh, const aiScene *scene) {
         }
 
         data.vertices_.push_back(vertex);
+    }
+
+    if (is_skeletal_mesh_) {
+        for (unsigned i = 0; i < mesh->mNumBones; ++i) {
+            const aiBone *bone = mesh->mBones[i];
+            std::string name = bone->mName.C_Str();
+
+            int bone_id;
+            if (auto it = skeleton_.bone_info_map_.find(name); it != skeleton_.bone_info_map_.end()) {
+                bone_id = it->second.id_;
+            } else {
+                bone_id = static_cast<int>(skeleton_.bone_info_map_.size());
+                skeleton_.bone_info_map_[name] = BoneInfo{bone_id, convert(bone->mOffsetMatrix)};
+            }
+
+            for (unsigned w = 0; w < bone->mNumWeights; ++w) {
+                const aiVertexWeight &vw = bone->mWeights[w];
+                Vertex &v = data.vertices_[vw.mVertexId];
+                for (int slot = 0; slot < kMaxBoneInfulence; ++slot) {
+                    if (v.bone_ids_[slot] == -1) {
+                        v.bone_ids_[slot] = bone_id;
+                        v.bone_weights_[slot] = vw.mWeight;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Normalize weights
+        for (auto &v: data.vertices_) {
+            // ReSharper disable once CppTooWideScopeInitStatement
+            const float sum = v.bone_weights_.x + v.bone_weights_.y + v.bone_weights_.z + v.bone_weights_.w;
+            if (sum > 0.0f) {
+                v.bone_weights_ /= sum;
+            }
+        }
     }
 
     data.indices_.reserve(static_cast<size_t>(mesh->mNumFaces) * 3);
@@ -234,4 +306,19 @@ std::shared_ptr<Texture> Model::load_material_texture(const aiScene *scene,
 
     texture_cache_.emplace(key, texture);
     return texture;
+}
+
+int Model::process_skeleton_node(const aiNode *node, int parent) {
+    SkeletonNode sn;
+    sn.name_ = node->mName.C_Str();
+    sn.local_transform_ = convert(node->mTransformation); // aiMatrix4x4 -> glm::mat4
+    sn.parent_ = parent;
+    int index = static_cast<int>(skeleton_.nodes_.size());
+    skeleton_.nodes_.push_back(sn);
+
+    for (unsigned i = 0; i < node->mNumChildren; ++i) {
+        int child = process_skeleton_node(node->mChildren[i], index);
+        skeleton_.nodes_[index].children_.push_back(child);
+    }
+    return index;
 }

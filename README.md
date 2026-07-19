@@ -31,8 +31,7 @@ attachments.
 **Languages**: C++ 20, GLSL  
 **Build System**: CMake  
 **Asset Management**: [TinyGLTF](https://github.com/syoyo/tinygltf), [Shader-C](https://github.com/google/shaderc)  
-**Third-Party
-**: [Volk](https://github.com/zeux/volk), [VMA](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator), [SDL3](https://github.com/libsdl-org/SDL), [GLM](https://github.com/g-truc/glm), [ImGui](https://github.com/ocornut/imgui)
+**Third-Party**: [Volk](https://github.com/zeux/volk), [VMA](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator), [SDL3](https://github.com/libsdl-org/SDL), [GLM](https://github.com/g-truc/glm), [ImGui](https://github.com/ocornut/imgui)
 
 ---
 

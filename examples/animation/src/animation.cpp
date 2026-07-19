@@ -7,6 +7,7 @@
 #include "buffer.h"
 #include "shader.h"
 #include "pipeline.h"
+#include "animator.h"
 
 constexpr uint32_t kWidth = 1280u;
 constexpr uint32_t kHeight = 720u;
@@ -19,6 +20,7 @@ struct ShaderData {
 struct alignas(16) PushConstant {
     glm::mat4 model_;
     VkDeviceAddress data_address_;
+    VkDeviceAddress bone_address_;
     uint32_t bindless_albedo_;
 };
 
@@ -36,6 +38,11 @@ int main(int argc, char *argv[]) {
     // load model
     Model astronaut_model{};
     astronaut_model.load(ctx.get(), "assets/models/astronaut.glb", true);
+    // Animation
+    Animator animator{};
+    if (astronaut_model.is_skeletal_mesh() && !astronaut_model.animations().empty()) {
+        animator.play(&astronaut_model, 0);
+    }
 
     std::vector<MeshData> meshes_data;
     std::vector<Buffer> vert_buffers;
@@ -83,6 +90,14 @@ int main(int argc, char *argv[]) {
     };
     Buffer uniform_buffer{};
     uniform_buffer.create(u_buf_desc);
+    BufferDesc bone_buf_desc{
+        .context = ctx.get(),
+        .usage_flags = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        .size = sizeof(glm::mat4) * kMaxBones,
+        .per_frame = true
+    };
+    Buffer bone_buffer{};
+    bone_buffer.create(bone_buf_desc);
 
     // load shaders
     [[maybe_unused]] const VkShaderModule vert_shader = Shader::create_shader_module(ctx.get(),
@@ -125,6 +140,11 @@ int main(int argc, char *argv[]) {
         {.location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Vertex, normal_)},
         {.location = 2, .binding = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(Vertex, uv_)},
         {.location = 3, .binding = 0, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = offsetof(Vertex, tangent_)},
+        {.location = 4, .binding = 0, .format = VK_FORMAT_R32G32B32A32_SINT, .offset = offsetof(Vertex, bone_ids_)},
+        {
+            .location = 5, .binding = 0, .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+            .offset = offsetof(Vertex, bone_weights_)
+        }
     };
     pipeline_builder.set_vertex_layout(vertex_binding, vertex_attributes);
     pipeline_builder.set_input_assembly(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
@@ -166,11 +186,14 @@ int main(int argc, char *argv[]) {
                                                    0.1f, 1000.0f);
         shader_data.projection_[1][1] *= -1.0f; // flip Y
 
-        shader_data.view_ = glm::lookAt(glm::vec3(0.0f, 15.0f, 25.0f),
+        shader_data.view_ = glm::lookAt(glm::vec3(0.0f, 5.0f, 25.0f),
                                         glm::vec3(0.0f, 5.0f, 0.0f),
                                         glm::vec3(0.0f, 1.0f, 0.0f));
 
         [[maybe_unused]] auto time = SDL_GetTicks() / 1000.0f;
+
+        animator.update(delta_time);
+        bone_buffer.update(animator.bone_matrices().data());
 
         ctx->acquire_command_buffer();
         {
@@ -203,12 +226,13 @@ int main(int argc, char *argv[]) {
                 for (auto i = 0; i < astronaut_model.meshes().size(); ++i) {
                     PushConstant pc{};
                     pc.data_address_ = uniform_buffer.address();
+                    pc.bone_address_ = bone_buffer.address();
                     [[maybe_unused]] const auto &mat = astronaut_model.meshes().at(i).material();
 
                     auto transform = glm::mat4(1.0f);
                     transform = glm::translate(transform, glm::vec3(0.0f, 0.0f, 0.0f));
-                    transform = glm::rotate(transform, glm::radians(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-                    transform = glm::scale(transform, glm::vec3(0.055f, 0.055f, 0.055f));
+                    transform = glm::rotate(transform, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+                    transform = glm::scale(transform, glm::vec3(5.0f));
 
                     pc.model_ = transform;
                     pc.bindless_albedo_ = mat->base_color_
@@ -242,6 +266,7 @@ int main(int argc, char *argv[]) {
         index_buffers.at(i).destroy();
     }
     uniform_buffer.destroy();
+    bone_buffer.destroy();
     ctx->destroy_pipeline_layout(pipeline_layout);
     ctx->destroy_pipeline(pipeline);
     ctx->destory_shader(vert_shader);

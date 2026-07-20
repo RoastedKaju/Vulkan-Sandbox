@@ -16,7 +16,7 @@ attachments.
 
 - Context management.
 - Pipeline and layout builder helpers.
-- Image layout state presistence.
+- Image layout state persistence.
 - **Dynamic rendering**.
 - **Buffer Device Address** (BDA) based push constant.
 - **Bindless textures** support.
@@ -32,6 +32,13 @@ attachments.
 **Build System**: CMake  
 **Asset Management**: [TinyGLTF](https://github.com/syoyo/tinygltf), [Shader-C](https://github.com/google/shaderc)  
 **Third-Party**: [Volk](https://github.com/zeux/volk), [VMA](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator), [SDL3](https://github.com/libsdl-org/SDL), [GLM](https://github.com/g-truc/glm), [ImGui](https://github.com/ocornut/imgui)
+
+## Getting Started
+- Clone the repository alongside its submodules `git clone --recursive "https://github.com/RoastedKaju/Vulkan-Tipu-Framework.git"`
+- Fetch dependencies for Shader-C module `python .\extern\shaderc\utils\git-sync-deps`
+- Configure CMake
+- Build any of the examples
+- Run
 
 ---
 
